@@ -1,4 +1,5 @@
 {
   "build_command": "pip install -r requirements.txt",
-  "start_command": "python bot.py"
+  "start_command": "python bot.py",
+  "python_version": "3.12"
 }
