@@ -28,10 +28,10 @@ async def send_daily_summary(app: Application):
             active       = in_progress + todo
 
             lines = [
-                f"☀️ <b>DAILY DEBRIEF  •  {today_str}</b>",
+                f"🌅 <b>MORNING SETLIST  •  {today_str}</b>",
                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
                 "",
-                "<b>YESTERDAY</b>",
+                "<b>YESTERDAY'S PERFORMANCE</b>",
             ]
 
             if done_yday:
@@ -42,13 +42,14 @@ async def send_daily_summary(app: Application):
                     lines.append(f"  ✔️ {trunc(q['text'], 42)}")
                 if len(done_yday) > 5:
                     lines.append(f"  … and {len(done_yday) - 5} more")
+                lines.append("おつかれさま！You killed it~ 🎵")
             else:
-                lines.append("  — No completions —")
+                lines.append("  — No completions yesterday —")
 
             lines += [
                 f"🔥 Streak: <b>{player['streak_days']} days</b>",
                 "",
-                f"<b>TODAY'S ACTIVE QUESTS ({len(active)})</b>",
+                f"<b>TODAY'S SETLIST ({len(active)})</b>",
             ]
 
             if active:
@@ -61,17 +62,17 @@ async def send_daily_summary(app: Application):
                     lines.append(f"{icon} [{lbl}] {trunc(q['text'], 38)}  <i>{q['tag']}</i>")
 
                 if len(active) > 6:
-                    lines.append(f"  … and {len(active) - 6} more on the board")
+                    lines.append(f"  … and {len(active) - 6} more on the stage")
 
                 if crit_n:
-                    lines.append(f"\n💡 {crit_n} critical quest(s). Clear those first.")
+                    lines.append(f"\n💡 {crit_n} critical quest(s). Clear it first, then take a bow~")
                 elif high_n:
-                    lines.append(f"\n💡 {high_n} high-priority quest(s) outstanding.")
+                    lines.append(f"\n💡 {high_n} high-priority quest(s) outstanding. You've got this~ 🎤")
             else:
-                lines.append("  — No active quests. Add some! —")
+                lines.append("  — Stage is empty~ Add some quests! —")
 
             kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("📋 Open Board", callback_data="board:refresh_new")
+                InlineKeyboardButton("📋 Open Stage", callback_data="board:refresh_new")
             ]])
 
             await app.bot.send_message(

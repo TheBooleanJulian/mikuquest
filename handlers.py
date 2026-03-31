@@ -85,9 +85,9 @@ def render_board(chat_id: int, tag_filter: str = None):
 
     lines = [
         f"╔══════════════════════════╗",
-        f"║  🗺 MIGUQUEST  •  Lv.{level} {title}",
+        f"║  🎤 MIGUQUEST  •  Lv.{level} {title}",
         f"║  🔥 {streak}-day streak  •  {xp} XP",
-        f"║  [{xp_bar(xp)}] {to_next} to next",
+        f"║  [{xp_bar(xp)}] {to_next} XP to next stage",
         f"╚══════════════════════════╝{tag_note}",
     ]
 
@@ -105,7 +105,7 @@ def render_board(chat_id: int, tag_filter: str = None):
                 callback_data=f"quest:{q['id']}"
             )])
     else:
-        lines.append("  — Clear —")
+        lines.append("  🎤 Stage is clear~ Add a new quest to begin the show!")
 
     # IN PROGRESS
     lines.append(f"\n⚡ <b>IN PROGRESS</b> ({len(in_progress)})")
@@ -119,7 +119,7 @@ def render_board(chat_id: int, tag_filter: str = None):
                 callback_data=f"quest:{q['id']}"
             )])
     else:
-        lines.append("  — Nothing in flight —")
+        lines.append("  — Nothing performing right now —")
 
     # DONE TODAY
     lines.append(f"\n✅ <b>DONE TODAY</b> ({len(done_today)})")
@@ -128,15 +128,15 @@ def render_board(chat_id: int, tag_filter: str = None):
         today_xp = sum(q["xp_value"] for q in done_today)
         for q in done_today:
             lines.append(f"✔️  {trunc(q['text'])}  +{q['xp_value']}xp")
-        lines.append(f"<i>+{today_xp} XP earned today</i>")
+        lines.append(f"<i>+{today_xp} XP earned today  🎵</i>")
     else:
-        lines.append("  — No completions yet today —")
+        lines.append("  — No completions yet~ —")
 
     # Controls
     keyboard.append([
-        InlineKeyboardButton("🔄 Refresh",   callback_data="board:refresh"),
-        InlineKeyboardButton("➕ New Quest",  callback_data="board:new"),
-        InlineKeyboardButton("📊 Stats",     callback_data="board:stats"),
+        InlineKeyboardButton("🔄 Refresh",      callback_data="board:refresh"),
+        InlineKeyboardButton("➕ New Quest",     callback_data="board:new"),
+        InlineKeyboardButton("📊 Concert Stats", callback_data="board:stats"),
     ])
 
     return "\n".join(lines), InlineKeyboardMarkup(keyboard)
@@ -150,18 +150,18 @@ def quest_card_markup(quest: dict) -> InlineKeyboardMarkup:
     rows = []
     if quest["status"] != "in_progress":
         rows.append([
-            InlineKeyboardButton("▶ Start",                callback_data=f"start:{qid}"),
-            InlineKeyboardButton(f"✅ Clear +{xpv}xp",    callback_data=f"done:{qid}"),
+            InlineKeyboardButton("▶ Performing now",          callback_data=f"start:{qid}"),
+            InlineKeyboardButton(f"✅ Nailed it! +{xpv}xp",  callback_data=f"done:{qid}"),
         ])
     else:
-        rows.append([InlineKeyboardButton(f"✅ Clear +{xpv}xp", callback_data=f"done:{qid}")])
+        rows.append([InlineKeyboardButton(f"✅ Nailed it! +{xpv}xp", callback_data=f"done:{qid}")])
 
     rows.append([
         InlineKeyboardButton("🔴 Critical", callback_data=f"prio:critical:{qid}"),
         InlineKeyboardButton("🟠 High",     callback_data=f"prio:high:{qid}"),
-        InlineKeyboardButton("🗑 Drop",     callback_data=f"drop_confirm:{qid}"),
+        InlineKeyboardButton("🗑 Cut from setlist", callback_data=f"drop_confirm:{qid}"),
     ])
-    rows.append([InlineKeyboardButton("← Board", callback_data="board:refresh")])
+    rows.append([InlineKeyboardButton("← Back to Stage", callback_data="board:refresh")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -187,26 +187,25 @@ async def _create_quest(update: Update, chat_id: int, text: str, source: str = "
     quest = db.add_quest(chat_id, clean, priority=priority, tag=tag, source=source)
 
     ico = PRIORITY_ICONS[priority]
-    lbl = PRIORITY_LABELS[priority]
-    src_note = "📩 from forward" if source == "forwarded" else ""
+    src_note = "📩 caught that note~" if source == "forwarded" else ""
 
     msg = (
-        f"⚔️ <b>Quest Logged</b>  {src_note}\n"
+        f"🎤 <b>Quest Added to Setlist~</b>  {src_note}\n"
         f"━━━━━━━━━━━━━━\n"
         f"{clean}\n\n"
         f"📌 Priority: <b>{priority.upper()}</b> {ico}   🏷 {tag}\n"
-        f"💎 XP: <b>+{quest['xp_value']}</b> on clear"
+        f"💎 <b>+{quest['xp_value']} XP</b> when you nail this one!"
     )
 
     kb = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ Done already",   callback_data=f"done:{quest['id']}"),
-            InlineKeyboardButton("▶ Start now",        callback_data=f"start:{quest['id']}"),
+            InlineKeyboardButton("✅ Already crushed it",  callback_data=f"done:{quest['id']}"),
+            InlineKeyboardButton("▶ Performing now",       callback_data=f"start:{quest['id']}"),
         ],
         [
-            InlineKeyboardButton("🔴 Critical",       callback_data=f"prio:critical:{quest['id']}"),
-            InlineKeyboardButton("🟠 High",            callback_data=f"prio:high:{quest['id']}"),
-            InlineKeyboardButton("🗑 Drop",            callback_data=f"drop_confirm:{quest['id']}"),
+            InlineKeyboardButton("🔴 Critical",            callback_data=f"prio:critical:{quest['id']}"),
+            InlineKeyboardButton("🟠 High",                callback_data=f"prio:high:{quest['id']}"),
+            InlineKeyboardButton("🗑 Cut from setlist",    callback_data=f"drop_confirm:{quest['id']}"),
         ],
     ])
     await update.message.reply_text(msg, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -231,13 +230,14 @@ async def _complete(chat_id: int, quest_id: int, query=None, update=None):
     done_cnt = len(db.get_completed_today(chat_id))
 
     msg = (
-        f"⚡ <b>+{quest['xp_value']} XP — Quest Cleared!</b>\n"
+        f"🎶 <b>QUEST CLEARED — ENCORE!</b>\n"
         f"{quest['text']}\n\n"
-        f"🏆 {player['total_xp']} XP  •  Lv.{player['level']}  •  {done_cnt} cleared today"
+        f"⚡ +{quest['xp_value']} XP  •  {player['total_xp']} total  •  Lv.{player['level']}\n"
+        f"🔥 {player['streak_days']}-day streak  •  {done_cnt} quests cleared today"
     )
     if level_up:
         title = db.get_title(player["level"])
-        msg += f"\n\n🎉 <b>LEVEL UP!  Lv.{player['level']} — {title}</b>"
+        msg += f"\n\n🎉 <b>LEVEL UP — NEW STAGE UNLOCKED!</b>\nWelcome to Lv.{player['level']} — {title}\nThe crowd goes wild~ ✨"
 
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("📋 Board", callback_data="board:refresh_new")
@@ -255,28 +255,29 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     db.get_or_create_player(chat_id)
     await update.message.reply_text(
-        "⚔️ <b>MiguQuest Bot — Online</b>\n\n"
-        "Your external RAM. Every message or forward becomes a quest.\n\n"
-        "Use /board to see your kanban.\n"
-        "Use /help for all commands.",
+        "🎤 <b>Miku is online! Let's compose today's setlist~</b>\n\n"
+        "Drop any task here and I'll turn it into a quest.\n"
+        "Forward messages, type freely — I'll catch everything.\n\n"
+        "/board to see your stage  •  /help for all commands\n"
+        "がんばって！✨",
         parse_mode=ParseMode.HTML
     )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "⚔️ <b>MiguQuest Commands</b>\n\n"
-        "<code>/q &lt;text&gt;</code>       — Log a quest\n"
-        "<code>/q !h Fix bug</code>   — Log with priority (!c !h !m !l)\n"
-        "<code>/board</code>           — Kanban board\n"
-        "<code>/done &lt;id&gt;</code>      — Mark quest done\n"
-        "<code>/begin &lt;id&gt;</code>     — Start a quest\n"
-        "<code>/drop &lt;id&gt;</code>      — Drop a quest\n"
-        "<code>/today</code>           — Active quests with quick clear\n"
-        "<code>/tag #accurova</code>  — Filter board by tag\n"
-        "<code>/stats</code>           — XP, level, streaks\n"
-        "<code>/clear</code>           — Archive done quests\n\n"
-        "<i>Any message you type or forward is auto-captured as a quest.</i>",
+        "🎵 <b>MiguQuest Commands</b>\n\n"
+        "<code>/q &lt;text&gt;</code>       — Add a quest to the setlist\n"
+        "<code>/q !h Fix bug</code>   — With priority (!c !h !m !l)\n"
+        "<code>/board</code>           — Your stage overview\n"
+        "<code>/done &lt;id&gt;</code>      — Clear a quest 🎶\n"
+        "<code>/begin &lt;id&gt;</code>     — Start performing\n"
+        "<code>/drop &lt;id&gt;</code>      — Cut from setlist\n"
+        "<code>/today</code>           — Today's active quests\n"
+        "<code>/tag #accurova</code>  — Filter by tag\n"
+        "<code>/stats</code>           — Your concert stats\n"
+        "<code>/clear</code>           — Archive cleared quests\n\n"
+        "<i>Any message you type or forward is auto-captured~ ✨</i>",
         parse_mode=ParseMode.HTML
     )
 
@@ -329,7 +330,7 @@ async def done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Show quick-pick list
     quests = db.get_quests(chat_id, status="todo") + db.get_quests(chat_id, status="in_progress")
     if not quests:
-        await update.message.reply_text("No active quests. All clear! 🎉")
+        await update.message.reply_text("🎶 No active quests~ Stage is clear! ✨")
         return
 
     kb = InlineKeyboardMarkup([
@@ -351,7 +352,7 @@ async def begin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         quest = db.update_quest_status(int(context.args[0]), "in_progress")
         if quest:
             await update.message.reply_text(
-                f"🔷 <b>Started:</b> {quest['text']}", parse_mode=ParseMode.HTML
+                f"🎵 <b>Performing now~</b> {quest['text']}", parse_mode=ParseMode.HTML
             )
         else:
             await update.message.reply_text("Quest not found.")
@@ -367,7 +368,7 @@ async def drop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         quest = db.update_quest_status(int(context.args[0]), "dropped")
         if quest:
-            await update.message.reply_text(f"🗑 Dropped: {quest['text']}")
+            await update.message.reply_text(f"🗑 Cut from the setlist. The show must go on~ {quest['text']}")
         else:
             await update.message.reply_text("Quest not found.")
     except ValueError:
@@ -383,13 +384,13 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     to_next    = 200 - (player["total_xp"] % 200)
 
     await update.message.reply_text(
-        f"📊 <b>MiguQuest Stats</b>\n"
+        f"🎵 <b>Concert Stats</b>\n"
         f"━━━━━━━━━━━━━━━━━\n"
-        f"🏆 Level: <b>{player['level']} — {title}</b>\n"
+        f"🎤 Level: <b>{player['level']} — {title}</b>\n"
         f"💎 Total XP: <b>{player['total_xp']}</b>\n"
-        f"[{xp_bar(player['total_xp'])}] {to_next} XP to next level\n\n"
+        f"[{xp_bar(player['total_xp'])}] {to_next} XP to next stage\n\n"
         f"🔥 Streak: <b>{player['streak_days']} days</b>\n"
-        f"📋 Total completed: <b>{player['quests_completed_total']}</b>\n"
+        f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
         f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>",
         parse_mode=ParseMode.HTML
     )
@@ -402,10 +403,10 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     active      = in_progress + todo
 
     if not active:
-        await update.message.reply_text("🎉 No active quests. All clear!")
+        await update.message.reply_text("🎶 Stage is clear! All quests cleared~ 今日もお疲れ様！✨")
         return
 
-    lines = ["⚔️ <b>Active Quests</b>\n"]
+    lines = ["🎤 <b>Active Quests</b>\n"]
     kb    = []
     for q in active[:15]:
         icon = STATUS_ICONS[q["status"]]
@@ -436,7 +437,7 @@ async def tag_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     count   = db.archive_done_quests(chat_id)
-    await update.message.reply_text(f"🗂 Archived {count} completed quest(s).")
+    await update.message.reply_text(f"🗂 Archived {count} cleared quest(s). Clean stage~ ✨")
 
 
 # ─── Callback Handler ─────────────────────────────────────────────────────────────
@@ -482,11 +483,11 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         quest    = db.get_quest(quest_id)
         if quest:
             kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🗑 Confirm Drop", callback_data=f"drop:{quest_id}"),
-                InlineKeyboardButton("Cancel",          callback_data=f"quest:{quest_id}"),
+                InlineKeyboardButton("🗑 Cut it", callback_data=f"drop:{quest_id}"),
+                InlineKeyboardButton("Keep it~", callback_data=f"quest:{quest_id}"),
             ]])
             await query.edit_message_text(
-                f"Drop this quest?\n\n<b>{quest['text']}</b>",
+                f"Cut this from the setlist?\n\n<b>{quest['text']}</b>",
                 parse_mode=ParseMode.HTML,
                 reply_markup=kb
             )
@@ -497,10 +498,10 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         quest    = db.update_quest_status(quest_id, "dropped")
         if quest:
             kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("← Board", callback_data="board:refresh_new")
+                InlineKeyboardButton("← Back to Stage", callback_data="board:refresh_new")
             ]])
             await query.edit_message_text(
-                f"🗑 Dropped: {quest['text']}", reply_markup=kb
+                f"🗑 Cut from the setlist. The show must go on~ {quest['text']}", reply_markup=kb
             )
 
     # ── Set priority ─────────────────────────────────────────────────────────────
@@ -527,8 +528,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Board: new quest prompt ───────────────────────────────────────────────────
     elif data == "board:new":
         await query.message.reply_text(
-            "Type your quest — or prefix with <code>!h</code> <code>!m</code> "
-            "<code>!l</code> <code>!c</code> for priority.\n"
+            "🎤 What's next on the setlist?\n"
+            "Prefix with <code>!h</code> <code>!m</code> <code>!l</code> <code>!c</code> for priority~\n"
             "Example: <code>!h Fix Accurova booking form</code>",
             parse_mode=ParseMode.HTML
         )
@@ -542,14 +543,14 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         to_next    = 200 - (player["total_xp"] % 200)
 
         text = (
-            f"📊 <b>MiguQuest Stats</b>\n"
+            f"🎵 <b>Concert Stats</b>\n"
             f"━━━━━━━━━━━━━━━━━\n"
-            f"🏆 Level: <b>{player['level']} — {title}</b>\n"
+            f"🎤 Level: <b>{player['level']} — {title}</b>\n"
             f"💎 Total XP: <b>{player['total_xp']}</b>\n"
-            f"[{xp_bar(player['total_xp'])}] {to_next} XP to next level\n\n"
+            f"[{xp_bar(player['total_xp'])}] {to_next} XP to next stage\n\n"
             f"🔥 Streak: <b>{player['streak_days']} days</b>\n"
-            f"📋 Total completed: <b>{player['quests_completed_total']}</b>\n"
+            f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
             f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>"
         )
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("← Board", callback_data="board:refresh")]])
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("← Back to Stage", callback_data="board:refresh")]])
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)

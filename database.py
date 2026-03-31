@@ -61,13 +61,13 @@ def compute_level(xp: int) -> int:
 
 
 def get_title(level: int) -> str:
-    if level < 5:  return "Scout"
-    if level < 10: return "Apprentice"
-    if level < 15: return "Journeyman"
-    if level < 20: return "Specialist"
-    if level < 25: return "Architect"
-    if level < 30: return "Commander"
-    return "Overlord"
+    if level < 5:  return "Roadie"
+    if level < 10: return "Opening Act"
+    if level < 15: return "Supporting Act"
+    if level < 20: return "Feature Artist"
+    if level < 25: return "Headliner"
+    if level < 30: return "World Tour"
+    return "✨ Diva Mode ✨"
 
 
 def get_or_create_player(chat_id: int) -> Dict:
