@@ -10,19 +10,12 @@ from telegram.ext import (
 )
 from database import init_db
 from handlers import (
-    start_command,
-    help_command,
-    quest_command,
-    board_command,
-    done_command,
-    begin_command,
-    drop_command,
-    stats_command,
-    today_command,
-    tag_command,
-    clear_command,
-    message_handler,
-    callback_handler,
+    start_command, help_command, quest_command, board_command,
+    done_command, begin_command, drop_command, stats_command,
+    today_command, tag_command, clear_command, note_command,
+    week_command, goals_command,
+    gcalauth_command, gcalcode_command, gcalsync_command,
+    message_handler, callback_handler,
 )
 from scheduler import setup_scheduler
 
@@ -36,7 +29,6 @@ logger = logging.getLogger(__name__)
 
 
 async def post_init(app: Application) -> None:
-    """Called after the event loop starts — safe to launch APScheduler here."""
     setup_scheduler(app)
 
 
@@ -55,20 +47,28 @@ def main():
         .build()
     )
 
-    # ── Commands ────────────────────────────────────────────────────────────────
-    app.add_handler(CommandHandler("start",  start_command))
-    app.add_handler(CommandHandler("help",   help_command))
-    app.add_handler(CommandHandler("q",      quest_command))
-    app.add_handler(CommandHandler("board",  board_command))
-    app.add_handler(CommandHandler("done",   done_command))
-    app.add_handler(CommandHandler("begin",  begin_command))
-    app.add_handler(CommandHandler("drop",   drop_command))
-    app.add_handler(CommandHandler("stats",  stats_command))
-    app.add_handler(CommandHandler("today",  today_command))
-    app.add_handler(CommandHandler("tag",    tag_command))
-    app.add_handler(CommandHandler("clear",  clear_command))
+    # Core
+    app.add_handler(CommandHandler("start",      start_command))
+    app.add_handler(CommandHandler("help",       help_command))
+    app.add_handler(CommandHandler("q",          quest_command))
+    app.add_handler(CommandHandler("board",      board_command))
+    app.add_handler(CommandHandler("done",       done_command))
+    app.add_handler(CommandHandler("begin",      begin_command))
+    app.add_handler(CommandHandler("drop",       drop_command))
+    app.add_handler(CommandHandler("today",      today_command))
+    app.add_handler(CommandHandler("tag",        tag_command))
+    app.add_handler(CommandHandler("clear",      clear_command))
+    app.add_handler(CommandHandler("stats",      stats_command))
+    # New features
+    app.add_handler(CommandHandler("note",       note_command))
+    app.add_handler(CommandHandler("week",       week_command))
+    app.add_handler(CommandHandler("goals",      goals_command))
+    # Google Calendar
+    app.add_handler(CommandHandler("gcalauth",   gcalauth_command))
+    app.add_handler(CommandHandler("gcalcode",   gcalcode_command))
+    app.add_handler(CommandHandler("gcalsync",   gcalsync_command))
 
-    # ── Callbacks & messages ────────────────────────────────────────────────────
+    # Callbacks & messages
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
 

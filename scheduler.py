@@ -6,26 +6,48 @@ import pytz
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application
 import database as db
-from handlers import PRIORITY_LABELS, STATUS_ICONS, trunc
+from handlers import (
+    PRIORITY_LABELS, STATUS_ICONS, trunc, _sync_gcal, _send_week_summary
+)
 
 logger = logging.getLogger(__name__)
 SGT = pytz.timezone("Asia/Singapore")
 
 
-async def send_daily_summary(app: Application):
+# ─── GCal Sync (5:50 AM SGT) ─────────────────────────────────────────────────
+
+async def gcal_sync_job(app: Application):
     chat_ids = db.get_all_chat_ids()
-    today_str  = date.today().strftime("%a %-d %b")
-    yesterday  = (date.today() - timedelta(days=1)).isoformat()
+    for chat_id in chat_ids:
+        try:
+            count = await _sync_gcal(chat_id)
+            if count and count > 0:
+                await app.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"🗓 <b>GCal Sync~</b> {count} calendar event(s) added to your setlist!",
+                    parse_mode="HTML",
+                )
+            logger.info(f"[GCal Sync] {chat_id}: {count} events synced")
+        except Exception as e:
+            logger.error(f"[GCal Sync] {chat_id}: {e}")
+
+
+# ─── Daily Debrief (6:00 AM SGT) ─────────────────────────────────────────────
+
+async def send_daily_summary(app: Application):
+    chat_ids  = db.get_all_chat_ids()
+    today_str = date.today().strftime("%a %-d %b")
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
 
     for chat_id in chat_ids:
         try:
-            player       = db.get_or_create_player(chat_id)
-            done_yday    = db.get_completed_on(chat_id, yesterday)
-            yesterday_xp = sum(q["xp_value"] for q in done_yday)
-
-            in_progress  = db.get_quests(chat_id, status="in_progress")
-            todo         = db.get_quests(chat_id, status="todo")
-            active       = in_progress + todo
+            db.clear_old_pins(chat_id)
+            player      = db.get_or_create_player(chat_id)
+            done_yday   = db.get_completed_on(chat_id, yesterday)
+            yday_xp     = sum(q["xp_value"] for q in done_yday)
+            in_progress = db.get_quests(chat_id, status="in_progress")
+            todo        = db.get_quests(chat_id, status="todo")
+            active      = in_progress + todo
 
             lines = [
                 f"🌅 <b>MORNING SETLIST  •  {today_str}</b>",
@@ -35,9 +57,7 @@ async def send_daily_summary(app: Application):
             ]
 
             if done_yday:
-                lines.append(
-                    f"✔️  {len(done_yday)} quest(s) cleared  •  +{yesterday_xp} XP"
-                )
+                lines.append(f"✔️  {len(done_yday)} quest(s) cleared  •  +{yday_xp} XP")
                 for q in done_yday[:5]:
                     lines.append(f"  ✔️ {trunc(q['text'], 42)}")
                 if len(done_yday) > 5:
@@ -55,24 +75,22 @@ async def send_daily_summary(app: Application):
             if active:
                 crit_n = sum(1 for q in active if q["priority"] == "critical")
                 high_n = sum(1 for q in active if q["priority"] == "high")
-
                 for q in active[:6]:
                     icon = STATUS_ICONS[q["status"]]
                     lbl  = PRIORITY_LABELS[q["priority"]]
                     lines.append(f"{icon} [{lbl}] {trunc(q['text'], 38)}  <i>{q['tag']}</i>")
-
                 if len(active) > 6:
                     lines.append(f"  … and {len(active) - 6} more on the stage")
-
                 if crit_n:
                     lines.append(f"\n💡 {crit_n} critical quest(s). Clear it first, then take a bow~")
                 elif high_n:
-                    lines.append(f"\n💡 {high_n} high-priority quest(s) outstanding. You've got this~ 🎤")
+                    lines.append(f"\n💡 {high_n} high-priority quest(s). You've got this~ 🎤")
             else:
                 lines.append("  — Stage is empty~ Add some quests! —")
 
             kb = InlineKeyboardMarkup([[
-                InlineKeyboardButton("📋 Open Stage", callback_data="board:refresh_new")
+                InlineKeyboardButton("📋 Open Stage",    callback_data="board:refresh_new"),
+                InlineKeyboardButton("⭐ Set Focus",      callback_data="goals:pick"),
             ]])
 
             await app.bot.send_message(
@@ -81,20 +99,84 @@ async def send_daily_summary(app: Application):
                 parse_mode="HTML",
                 reply_markup=kb,
             )
-            logger.info(f"[Scheduler] Sent daily summary to {chat_id}")
-
+            logger.info(f"[Debrief] Sent to {chat_id}")
         except Exception as e:
-            logger.error(f"[Scheduler] Error sending to {chat_id}: {e}")
+            logger.error(f"[Debrief] {chat_id}: {e}")
 
+
+# ─── Due Date Reminders (every 30 min) ────────────────────────────────────────
+
+async def check_reminders(app: Application):
+    chat_ids = db.get_all_chat_ids()
+    for chat_id in chat_ids:
+        try:
+            due_quests = db.get_due_reminders(within_minutes=60)
+            due_for_chat = [q for q in due_quests if q["chat_id"] == chat_id]
+            for quest in due_for_chat:
+                db.mark_reminder_sent(quest["id"])
+                lbl = PRIORITY_LABELS[quest["priority"]]
+                kb  = InlineKeyboardMarkup([[
+                    InlineKeyboardButton(f"✅ Nailed it! +{quest['xp_value']}xp",
+                                         callback_data=f"done:{quest['id']}"),
+                    InlineKeyboardButton("▶ Start now",
+                                         callback_data=f"start:{quest['id']}"),
+                ]])
+                await app.bot.send_message(
+                    chat_id=chat_id,
+                    text=(
+                        f"⏰ <b>Due soon~</b>\n"
+                        f"[{lbl}] {quest['text']}\n"
+                        f"📅 Due: <b>{quest['due_date']}</b>"
+                    ),
+                    parse_mode="HTML",
+                    reply_markup=kb,
+                )
+            if due_for_chat:
+                logger.info(f"[Reminders] {chat_id}: {len(due_for_chat)} reminder(s) sent")
+        except Exception as e:
+            logger.error(f"[Reminders] {chat_id}: {e}")
+
+
+# ─── Weekly Summary (Sunday 8 PM SGT) ─────────────────────────────────────────
+
+async def send_weekly_summary(app: Application):
+    chat_ids = db.get_all_chat_ids()
+    for chat_id in chat_ids:
+        try:
+            await _send_week_summary(
+                chat_id,
+                send_fn=lambda *a, **kw: app.bot.send_message(chat_id=chat_id, *a, **kw)
+            )
+            logger.info(f"[Weekly] Sent to {chat_id}")
+        except Exception as e:
+            logger.error(f"[Weekly] {chat_id}: {e}")
+
+
+# ─── Setup ────────────────────────────────────────────────────────────────────
 
 def setup_scheduler(app: Application):
     scheduler = AsyncIOScheduler(timezone=SGT)
+
+    # GCal sync — 5:50 AM SGT
     scheduler.add_job(
-        send_daily_summary,
-        CronTrigger(hour=6, minute=0, timezone=SGT),
-        args=[app],
-        id="daily_summary",
-        replace_existing=True,
+        gcal_sync_job, CronTrigger(hour=5, minute=50, timezone=SGT),
+        args=[app], id="gcal_sync", replace_existing=True,
     )
+    # Morning debrief — 6:00 AM SGT
+    scheduler.add_job(
+        send_daily_summary, CronTrigger(hour=6, minute=0, timezone=SGT),
+        args=[app], id="daily_summary", replace_existing=True,
+    )
+    # Due date reminders — every 30 min
+    scheduler.add_job(
+        check_reminders, CronTrigger(minute="0,30", timezone=SGT),
+        args=[app], id="reminders", replace_existing=True,
+    )
+    # Weekly summary — Sunday 8 PM SGT
+    scheduler.add_job(
+        send_weekly_summary, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone=SGT),
+        args=[app], id="weekly_summary", replace_existing=True,
+    )
+
     scheduler.start()
-    logger.info("[Scheduler] Daily summary scheduled — 06:00 SGT")
+    logger.info("[Scheduler] Jobs: GCal sync 05:50 | Debrief 06:00 | Reminders :00/:30 | Weekly Sun 20:00 — all SGT")
