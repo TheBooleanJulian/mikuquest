@@ -40,6 +40,8 @@ SKIP_WORDS = {"ok", "okay", "yes", "no", "k", "thanks", "ty", "noted", "sure",
 RECURRING_MAP = {"daily": "daily", "weekly": "weekly", "monthly": "monthly",
                  "day": "daily", "week": "weekly", "month": "monthly"}
 
+SHARE_KINDS = {"board", "today", "week", "stats"}
+
 
 # ─── Utilities ──────────────────────────────────────────────────────────────────
 
@@ -206,6 +208,9 @@ def render_board(chat_id: int, tag_filter: str = None):
         InlineKeyboardButton("📊 Concert Stats",  callback_data="board:stats"),
         InlineKeyboardButton("📅 Week",           callback_data="board:week"),
     ])
+    keyboard.append([
+        InlineKeyboardButton("🔗 Share Stage",    callback_data="share:board"),
+    ])
 
     return "\n".join(lines), InlineKeyboardMarkup(keyboard)
 
@@ -257,6 +262,7 @@ def quest_card_markup(quest: dict, is_goal: bool = False) -> InlineKeyboardMarku
         InlineKeyboardButton("⭐ Set as Focus", callback_data=f"goal:set:{qid}")
     )
     rows.append([goal_btn])
+    rows.append([InlineKeyboardButton("🔗 Share Quest", callback_data=f"share:quest:{qid}")])
     rows.append([InlineKeyboardButton("← Back to Stage", callback_data="board:refresh")])
     return InlineKeyboardMarkup(rows)
 
@@ -404,6 +410,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<b>Stats &amp; Housekeeping</b>\n"
         "<code>/stats</code>                 — Concert stats\n"
         "<code>/clear</code>                 — Archive cleared quests\n\n"
+        "<b>Web</b>\n"
+        "<code>/web</code>                   — Get a login link for the web app\n"
+        "<code>/share board</code>           — Get a public read-only share link\n\n"
         "<i>Any message you type or forward is auto-captured~ ✨\n"
         "Syntax: !c/!h/!m/!l  due:tomorrow  repeat:weekly</i>",
         parse_mode=ParseMode.HTML
@@ -703,6 +712,61 @@ async def _send_goals_picker(chat_id: int, send_fn, edit_fn=None):
         await send_fn(txt, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
 
 
+# ─── Web (magic login + share links) ─────────────────────────────────────────
+
+def web_base_url() -> Optional[str]:
+    url = os.environ.get("WEB_BASE_URL")
+    return url.rstrip("/") if url else None
+
+
+async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    base    = web_base_url()
+    if not base:
+        await update.message.reply_text("⚠️ WEB_BASE_URL is not configured yet.")
+        return
+    token = db.create_login_token(chat_id)
+    await update.message.reply_text(
+        f"🌐 <b>Your MiguQuest login link~</b>\n\n"
+        f"{base}/auth/{token}\n\n"
+        f"<i>Valid for 10 minutes, one-time use. Don't share this one!</i>",
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def share_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    base    = web_base_url()
+    if not base:
+        await update.message.reply_text("⚠️ WEB_BASE_URL is not configured yet.")
+        return
+    kind = context.args[0].lower() if context.args else "board"
+    if kind not in SHARE_KINDS:
+        await update.message.reply_text(f"Usage: /share [{'|'.join(sorted(SHARE_KINDS))}]")
+        return
+    token = db.create_share(chat_id, kind)
+    await update.message.reply_text(
+        f"🔗 <b>Public share link ({kind})~</b>\n\n"
+        f"{base}/s/{token}\n\n"
+        f"<i>Anyone with this link can view a read-only snapshot. "
+        f"Send /share again to make a new one, or ask to have it revoked.</i>",
+        parse_mode=ParseMode.HTML
+    )
+
+
+async def _share_reply(chat_id: int, kind: str, quest_id: Optional[int], send_fn):
+    base = web_base_url()
+    if not base:
+        await send_fn("⚠️ WEB_BASE_URL is not configured yet.")
+        return
+    token = db.create_share(chat_id, kind, quest_id=quest_id)
+    label = f"quest #{quest_id}" if quest_id else kind
+    await send_fn(
+        f"🔗 <b>Public share link ({label})~</b>\n\n{base}/s/{token}",
+        parse_mode=ParseMode.HTML
+    )
+
+
 # ─── Google Calendar Commands ─────────────────────────────────────────────────
 
 async def gcalauth_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -927,6 +991,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ── Board: week inline ────────────────────────────────────────────────────────
     elif data == "board:week":
         await _send_week_summary(chat_id, send_fn=query.message.reply_text)
+
+    # ── Share links ──────────────────────────────────────────────────────────────
+    elif data.startswith("share:quest:"):
+        quest_id = int(data.split(":")[2])
+        await _share_reply(chat_id, "quest", quest_id, send_fn=query.message.reply_text)
+
+    elif data.startswith("share:"):
+        kind = data.split(":")[1]
+        if kind in SHARE_KINDS:
+            await _share_reply(chat_id, kind, None, send_fn=query.message.reply_text)
 
 
 async def _refresh_goals_picker(query, chat_id: int):

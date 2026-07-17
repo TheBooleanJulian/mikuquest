@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}MiguQuest — Shared Weekly Report{% endblock %}
+{% block content %}
+<p class="badge">👁 Read-only shared view</p>
+<div class="card">
+  <h1>📊 Weekly Report — {{ week_str }}</h1>
+  <p>✔️ {{ quests|length }} quests cleared &nbsp;•&nbsp; +{{ week_xp }} XP</p>
+  <p>🔥 Streak: {{ player.streak_days }} days &nbsp;•&nbsp; 🎤 Lv.{{ player.level }} — {{ title }}</p>
+</div>
+<div class="card">
+  <h2>By Tag</h2>
+  <ul class="tag-list">
+    {% for tag, count in tag_counts %}
+    <li>{{ tag }} — {{ count }}</li>
+    {% endfor %}
+  </ul>
+  {% if not quests %}<p class="empty">— No quests cleared this week~ —</p>{% endif %}
+</div>
+{% endblock %}

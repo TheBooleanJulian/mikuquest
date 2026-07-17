@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}MiguQuest — Weekly Report{% endblock %}
+{% block nav %}
+<nav>
+  <a href="/app">Board</a>
+  <a href="/app/week">Week</a>
+  <a href="/logout">Logout</a>
+</nav>
+{% endblock %}
+{% block content %}
+{% if share_link %}
+<div class="card share-toast">
+  🔗 Share link ready: <a href="{{ share_link }}">{{ share_link }}</a>
+</div>
+{% endif %}
+<div class="card">
+  <h1>📊 Weekly Report — {{ week_str }}</h1>
+  <p>✔️ {{ quests|length }} quests cleared &nbsp;•&nbsp; +{{ week_xp }} XP</p>
+  <p>🔥 Streak: {{ player.streak_days }} days &nbsp;•&nbsp; 🎤 Lv.{{ player.level }} — {{ title }}</p>
+</div>
+
+<div class="card">
+  <h2>By Tag</h2>
+  <ul class="tag-list">
+    {% for tag, count in tag_counts %}
+    <li>{{ tag }} — {{ count }}</li>
+    {% endfor %}
+  </ul>
+  {% if crit or high %}
+  <p class="muted">🔴 Critical: {{ crit }} &nbsp;•&nbsp; 🟠 High: {{ high }}</p>
+  {% endif %}
+  {% if not quests %}<p class="empty">— No quests cleared this week~ —</p>{% endif %}
+</div>
+
+<div class="card">
+  <form method="post" action="/app/share" class="inline-form">
+    <input type="hidden" name="kind" value="week">
+    <input type="hidden" name="return_to" value="/app/week">
+    <button type="submit">🔗 Share this week</button>
+  </form>
+</div>
+{% endblock %}

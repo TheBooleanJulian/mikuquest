@@ -15,6 +15,7 @@ from handlers import (
     today_command, tag_command, clear_command, note_command,
     week_command, goals_command,
     gcalauth_command, gcalcode_command, gcalsync_command,
+    web_command, share_command,
     message_handler, callback_handler,
 )
 from scheduler import setup_scheduler
@@ -67,6 +68,9 @@ def main():
     app.add_handler(CommandHandler("gcalauth",   gcalauth_command))
     app.add_handler(CommandHandler("gcalcode",   gcalcode_command))
     app.add_handler(CommandHandler("gcalsync",   gcalsync_command))
+    # Web
+    app.add_handler(CommandHandler("web",        web_command))
+    app.add_handler(CommandHandler("share",      share_command))
 
     # Callbacks & messages
     app.add_handler(CallbackQueryHandler(callback_handler))

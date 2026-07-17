@@ -1,0 +1,27 @@
+{% macro quest_row(q, goal_ids, editable=False) %}
+<li class="quest priority-{{ q.priority }}">
+  <div class="quest-main">
+    <span class="icon">{{ STATUS_ICONS[q.status] }}</span>
+    {% if q.id in goal_ids %}<span class="star">⭐</span>{% endif %}
+    <span class="label">[{{ PRIORITY_LABELS[q.priority] }}]</span>
+    <span class="text">{{ q.text }}</span>
+    <span class="due">{{ fmt_due(q.due_date) }}</span>
+    <span class="tag">{{ q.tag }}</span>
+  </div>
+  {% if editable %}
+  <div class="quest-actions">
+    {% if q.status != "in_progress" %}
+    <form method="post" action="/app/quest/{{ q.id }}/begin"><button>▶ Begin</button></form>
+    {% endif %}
+    <form method="post" action="/app/quest/{{ q.id }}/done"><button class="primary">✅ +{{ q.xp_value }}xp</button></form>
+    <form method="post" action="/app/quest/{{ q.id }}/drop"><button class="danger">🗑</button></form>
+    <form method="post" action="/app/share">
+      <input type="hidden" name="kind" value="quest">
+      <input type="hidden" name="quest_id" value="{{ q.id }}">
+      <input type="hidden" name="return_to" value="/app">
+      <button type="submit">🔗 Share</button>
+    </form>
+  </div>
+  {% endif %}
+</li>
+{% endmacro %}

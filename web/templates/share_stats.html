@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}MiguQuest — Shared Stats{% endblock %}
+{% block content %}
+<p class="badge">👁 Read-only shared view</p>
+<div class="card stage-header">
+  <h1>🎤 Level {{ player.level }} — {{ title }}</h1>
+  <p>💎 Total XP: <b>{{ player.total_xp }}</b></p>
+  <div class="xpbar"><div class="xpbar-fill" style="width: {{ ((200 - to_next) / 200 * 100) | round(1) }}%"></div></div>
+  <p class="muted">{{ to_next }} XP to next stage</p>
+  <p>🔥 Streak: <b>{{ player.streak_days }} days</b></p>
+  <p>📋 Total cleared: <b>{{ player.quests_completed_total }}</b></p>
+  <p>☀️ Today: <b>{{ done_today|length }} cleared • +{{ today_xp }} XP</b></p>
+</div>
+{% endblock %}

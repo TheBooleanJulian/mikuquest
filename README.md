@@ -16,6 +16,8 @@ Every message or forward becomes a quest. Complete quests, earn XP, level up. Da
 - **XP + Levels** — Critical=40xp, High=30, Medium=20, Low=10. Level up every 200 XP
 - **Streaks** — consecutive days with ≥1 quest cleared
 - **Daily 6AM SGT Debrief** — yesterday's completions + today's active quests
+- **Web app** — `/web` DMs a one-time login link to a browser dashboard that mirrors the same data as the bot
+- **Share links** — `/share board|today|week|stats`, or the 🔗 buttons on the board/quest cards, generate public read-only links
 
 ---
 
@@ -33,6 +35,8 @@ Every message or forward becomes a quest. Complete quests, earn XP, level up. Da
 | `/tag #accurova` | Board filtered by tag |
 | `/stats` | XP, level, streak, totals |
 | `/clear` | Archive all done quests |
+| `/web` | One-time login link to the web dashboard |
+| `/share board` | Public read-only share link (`board`\|`today`\|`week`\|`stats`) |
 
 ---
 
@@ -47,16 +51,35 @@ git clone https://github.com/TheBooleanJulian/miguquest-bot
 cd miguquest-bot
 pip install -r requirements.txt
 cp .env.example .env
-# Edit .env — add BOT_TOKEN
+# Edit .env — add BOT_TOKEN, DATABASE_URL (a local/dev Postgres), WEB_BASE_URL, SESSION_SECRET
 python bot.py
 ```
 
+To also run the web app locally:
+```bash
+uvicorn web.app:app --reload --port 8000
+# then set WEB_BASE_URL=http://localhost:8000 in .env
+```
+
+If you have existing data in the old `data/miguquest.db` SQLite file, copy it into
+Postgres once with:
+```bash
+DATABASE_URL=... SQLITE_PATH=data/miguquest.db python scripts/migrate_sqlite_to_pg.py
+```
+
 ### 3. Deploy to Zeabur
+The bot and the web app share one Postgres database and run as **two services**
+in the same Zeabur project:
+
 1. Push to GitHub
-2. New project → Deploy from GitHub → select `miguquest-bot`
-3. Add environment variable: `BOT_TOKEN=<your token>`
-4. Add persistent volume mounted at `/data`, set `DB_PATH=/data/miguquest.db`
-5. Deploy — done
+2. New project → add a **Postgres** plugin (Zeabur managed database)
+3. **Bot service** — Deploy from GitHub → select `miguquest-bot`
+   - `start_command: python bot.py` (default `zbpack.json`)
+   - Env vars: `BOT_TOKEN`, `DATABASE_URL` (reference the Postgres plugin), `WEB_BASE_URL`
+4. **Web service** — add a second service from the same GitHub repo
+   - Override the start command to `uvicorn web.app:app --host 0.0.0.0 --port $PORT`
+   - Env vars: `DATABASE_URL` (same Postgres plugin), `SESSION_SECRET`, `WEB_BASE_URL` (this service's own public URL)
+5. Deploy both — done
 
 ---
 
@@ -95,4 +118,4 @@ Keywords in your quest text are matched to tags automatically:
 
 ---
 
-Built with `python-telegram-bot` v20 · SQLite · APScheduler · Zeabur
+Built with `python-telegram-bot` v20 · FastAPI · Postgres · APScheduler · Zeabur

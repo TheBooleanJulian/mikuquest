@@ -1,20 +1,33 @@
-import sqlite3
 import os
+import secrets
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict
 from contextlib import contextmanager
 
-DB_PATH = os.environ.get("DB_PATH", "data/miguquest.db")
-XP_MAP  = {"critical": 40, "high": 30, "medium": 20, "low": 10}
+import psycopg2
+import psycopg2.extras
+import psycopg2.pool
+
+DATABASE_URL = os.environ.get("DATABASE_URL")
+XP_MAP = {"critical": 40, "high": 30, "medium": 20, "low": 10}
+
+_pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
+
+
+def _get_pool() -> psycopg2.pool.SimpleConnectionPool:
+    global _pool
+    if _pool is None:
+        if not DATABASE_URL:
+            raise RuntimeError("DATABASE_URL environment variable is not set.")
+        _pool = psycopg2.pool.SimpleConnectionPool(1, 10, dsn=DATABASE_URL)
+    return _pool
 
 
 @contextmanager
 def get_db():
-    db_dir = os.path.dirname(DB_PATH)
-    if db_dir:
-        os.makedirs(db_dir, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    pool = _get_pool()
+    conn = pool.getconn()
+    conn.cursor_factory = psycopg2.extras.RealDictCursor
     try:
         yield conn
         conn.commit()
@@ -22,15 +35,16 @@ def get_db():
         conn.rollback()
         raise
     finally:
-        conn.close()
+        pool.putconn(conn)
 
 
 def init_db():
     with get_db() as conn:
-        conn.executescript("""
+        cur = conn.cursor()
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS quests (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id         INTEGER NOT NULL,
+                id              SERIAL PRIMARY KEY,
+                chat_id         BIGINT  NOT NULL,
                 text            TEXT    NOT NULL,
                 source          TEXT    DEFAULT 'typed',
                 status          TEXT    DEFAULT 'todo',
@@ -48,7 +62,7 @@ def init_db():
             );
 
             CREATE TABLE IF NOT EXISTS player (
-                chat_id                 INTEGER PRIMARY KEY,
+                chat_id                 BIGINT PRIMARY KEY,
                 total_xp               INTEGER DEFAULT 0,
                 level                  INTEGER DEFAULT 1,
                 streak_days            INTEGER DEFAULT 0,
@@ -57,55 +71,36 @@ def init_db():
             );
 
             CREATE TABLE IF NOT EXISTS quest_messages (
-                chat_id     INTEGER NOT NULL,
-                message_id  INTEGER NOT NULL,
+                chat_id     BIGINT  NOT NULL,
+                message_id  BIGINT  NOT NULL,
                 quest_id    INTEGER NOT NULL,
                 PRIMARY KEY (chat_id, message_id)
             );
 
             CREATE TABLE IF NOT EXISTS daily_goals (
-                chat_id  INTEGER NOT NULL,
+                chat_id  BIGINT  NOT NULL,
                 quest_id INTEGER NOT NULL,
                 date     TEXT    NOT NULL,
                 PRIMARY KEY (chat_id, quest_id, date)
             );
-        """)
-    _migrate_db()
 
+            CREATE TABLE IF NOT EXISTS web_login_tokens (
+                token       TEXT PRIMARY KEY,
+                chat_id     BIGINT NOT NULL,
+                created_at  TEXT   NOT NULL,
+                expires_at  TEXT   NOT NULL,
+                used_at     TEXT
+            );
 
-def _migrate_db():
-    """Safely add new columns to existing deployments."""
-    new_columns = [
-        ("quests", "notes",         "TEXT    DEFAULT ''"),
-        ("quests", "reminder_sent", "INTEGER DEFAULT 0"),
-        ("quests", "recurring",     "TEXT    DEFAULT NULL"),
-        ("quests", "pinned",        "INTEGER DEFAULT 0"),
-        ("quests", "gcal_event_id", "TEXT    DEFAULT NULL"),
-    ]
-    with get_db() as conn:
-        for table, col, coldef in new_columns:
-            try:
-                conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {coldef}")
-            except Exception:
-                pass  # column already exists
-
-        # quest_messages table
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS quest_messages (
-                chat_id    INTEGER NOT NULL,
-                message_id INTEGER NOT NULL,
-                quest_id   INTEGER NOT NULL,
-                PRIMARY KEY (chat_id, message_id)
-            )
-        """)
-        # daily_goals table
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS daily_goals (
-                chat_id  INTEGER NOT NULL,
-                quest_id INTEGER NOT NULL,
-                date     TEXT    NOT NULL,
-                PRIMARY KEY (chat_id, quest_id, date)
-            )
+            CREATE TABLE IF NOT EXISTS shares (
+                token       TEXT PRIMARY KEY,
+                chat_id     BIGINT  NOT NULL,
+                kind        TEXT    NOT NULL,
+                quest_id    INTEGER,
+                created_at  TEXT    NOT NULL,
+                expires_at  TEXT,
+                revoked     INTEGER DEFAULT 0
+            );
         """)
 
 
@@ -127,29 +122,33 @@ def get_title(level: int) -> str:
 
 def get_or_create_player(chat_id: int) -> Dict:
     with get_db() as conn:
-        row = conn.execute("SELECT * FROM player WHERE chat_id = ?", (chat_id,)).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM player WHERE chat_id = %s", (chat_id,))
+        row = cur.fetchone()
         if not row:
-            conn.execute(
-                "INSERT INTO player (chat_id, last_active_date) VALUES (?, ?)",
+            cur.execute(
+                "INSERT INTO player (chat_id, last_active_date) VALUES (%s, %s)",
                 (chat_id, date.today().isoformat())
             )
-            row = conn.execute("SELECT * FROM player WHERE chat_id = ?", (chat_id,)).fetchone()
+            cur.execute("SELECT * FROM player WHERE chat_id = %s", (chat_id,))
+            row = cur.fetchone()
         return dict(row)
 
 
 def update_player(chat_id: int, **kwargs):
     if not kwargs:
         return
-    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    sets = ", ".join(f"{k} = %s" for k in kwargs)
     vals = list(kwargs.values()) + [chat_id]
     with get_db() as conn:
-        conn.execute(f"UPDATE player SET {sets} WHERE chat_id = ?", vals)
+        conn.cursor().execute(f"UPDATE player SET {sets} WHERE chat_id = %s", vals)
 
 
 def get_all_chat_ids() -> List[int]:
     with get_db() as conn:
-        rows = conn.execute("SELECT DISTINCT chat_id FROM player").fetchall()
-        return [r["chat_id"] for r in rows]
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT chat_id FROM player")
+        return [r["chat_id"] for r in cur.fetchall()]
 
 
 # ─── Quests ─────────────────────────────────────────────────────────────────────
@@ -161,34 +160,38 @@ def add_quest(chat_id: int, text: str, priority: str = "medium",
     xp  = XP_MAP.get(priority, 20)
     now = datetime.now().isoformat()
     with get_db() as conn:
-        cur = conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             "INSERT INTO quests (chat_id, text, source, status, priority, tag, xp_value, "
             "due_date, recurring, gcal_event_id, created_at) "
-            "VALUES (?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, 'todo', %s, %s, %s, %s, %s, %s, %s) RETURNING id",
             (chat_id, text[:300], source, priority, tag, xp,
              due_date, recurring, gcal_event_id, now)
         )
-        row = conn.execute("SELECT * FROM quests WHERE id = ?", (cur.lastrowid,)).fetchone()
-        return dict(row)
+        quest_id = cur.fetchone()["id"]
+        cur.execute("SELECT * FROM quests WHERE id = %s", (quest_id,))
+        return dict(cur.fetchone())
 
 
 def get_quest(quest_id: int) -> Optional[Dict]:
     with get_db() as conn:
-        row = conn.execute("SELECT * FROM quests WHERE id = ?", (quest_id,)).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM quests WHERE id = %s", (quest_id,))
+        row = cur.fetchone()
         return dict(row) if row else None
 
 
 def get_quests(chat_id: int, status: Optional[str] = None,
                tag: Optional[str] = None) -> List[Dict]:
-    query  = "SELECT * FROM quests WHERE chat_id = ?"
+    query  = "SELECT * FROM quests WHERE chat_id = %s"
     params: list = [chat_id]
     if status:
-        query += " AND status = ?"
+        query += " AND status = %s"
         params.append(status)
     else:
         query += " AND status NOT IN ('dropped', 'archived')"
     if tag:
-        query += " AND tag = ?"
+        query += " AND tag = %s"
         params.append(tag)
     query += (
         " ORDER BY pinned DESC, "
@@ -198,29 +201,34 @@ def get_quests(chat_id: int, status: Optional[str] = None,
         "due_date ASC, created_at ASC"
     )
     with get_db() as conn:
-        rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        cur = conn.cursor()
+        cur.execute(query, params)
+        return [dict(r) for r in cur.fetchall()]
 
 
 def update_quest_status(quest_id: int, status: str) -> Optional[Dict]:
     completed_at = datetime.now().isoformat() if status == "done" else None
     with get_db() as conn:
-        conn.execute(
-            "UPDATE quests SET status = ?, completed_at = ? WHERE id = ?",
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE quests SET status = %s, completed_at = %s WHERE id = %s",
             (status, completed_at, quest_id)
         )
-        row = conn.execute("SELECT * FROM quests WHERE id = ?", (quest_id,)).fetchone()
+        cur.execute("SELECT * FROM quests WHERE id = %s", (quest_id,))
+        row = cur.fetchone()
         return dict(row) if row else None
 
 
 def update_quest_priority(quest_id: int, priority: str) -> Optional[Dict]:
     xp = XP_MAP.get(priority, 20)
     with get_db() as conn:
-        conn.execute(
-            "UPDATE quests SET priority = ?, xp_value = ? WHERE id = ?",
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE quests SET priority = %s, xp_value = %s WHERE id = %s",
             (priority, xp, quest_id)
         )
-        row = conn.execute("SELECT * FROM quests WHERE id = ?", (quest_id,)).fetchone()
+        cur.execute("SELECT * FROM quests WHERE id = %s", (quest_id,))
+        row = cur.fetchone()
         return dict(row) if row else None
 
 
@@ -285,34 +293,39 @@ def _spawn_recurring(chat_id: int, quest: Dict):
 
 def append_note(quest_id: int, note: str) -> Optional[Dict]:
     with get_db() as conn:
-        row = conn.execute("SELECT notes FROM quests WHERE id = ?", (quest_id,)).fetchone()
+        cur = conn.cursor()
+        cur.execute("SELECT notes FROM quests WHERE id = %s", (quest_id,))
+        row = cur.fetchone()
         if not row:
             return None
         existing = row["notes"] or ""
         ts       = datetime.now().strftime("%d %b %H:%M")
         sep      = "\n" if existing else ""
         new_notes = existing + f"{sep}[{ts}] {note}"
-        conn.execute("UPDATE quests SET notes = ? WHERE id = ?", (new_notes, quest_id))
-        row = conn.execute("SELECT * FROM quests WHERE id = ?", (quest_id,)).fetchone()
-        return dict(row)
+        cur.execute("UPDATE quests SET notes = %s WHERE id = %s", (new_notes, quest_id))
+        cur.execute("SELECT * FROM quests WHERE id = %s", (quest_id,))
+        return dict(cur.fetchone())
 
 
 # ─── Quest message tracking ───────────────────────────────────────────────────
 
 def save_quest_message(chat_id: int, message_id: int, quest_id: int):
     with get_db() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO quest_messages (chat_id, message_id, quest_id) VALUES (?,?,?)",
+        conn.cursor().execute(
+            "INSERT INTO quest_messages (chat_id, message_id, quest_id) VALUES (%s,%s,%s) "
+            "ON CONFLICT (chat_id, message_id) DO UPDATE SET quest_id = EXCLUDED.quest_id",
             (chat_id, message_id, quest_id)
         )
 
 
 def get_quest_by_message(chat_id: int, message_id: int) -> Optional[int]:
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT quest_id FROM quest_messages WHERE chat_id = ? AND message_id = ?",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT quest_id FROM quest_messages WHERE chat_id = %s AND message_id = %s",
             (chat_id, message_id)
-        ).fetchone()
+        )
+        row = cur.fetchone()
         return row["quest_id"] if row else None
 
 
@@ -321,12 +334,14 @@ def get_quest_by_message(chat_id: int, message_id: int) -> Optional[int]:
 def set_daily_goal(chat_id: int, quest_id: int):
     today = date.today().isoformat()
     with get_db() as conn:
-        conn.execute(
-            "INSERT OR IGNORE INTO daily_goals (chat_id, quest_id, date) VALUES (?,?,?)",
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO daily_goals (chat_id, quest_id, date) VALUES (%s,%s,%s) "
+            "ON CONFLICT (chat_id, quest_id, date) DO NOTHING",
             (chat_id, quest_id, today)
         )
-        conn.execute(
-            "UPDATE quests SET pinned = 1 WHERE id = ? AND chat_id = ?",
+        cur.execute(
+            "UPDATE quests SET pinned = 1 WHERE id = %s AND chat_id = %s",
             (quest_id, chat_id)
         )
 
@@ -334,12 +349,13 @@ def set_daily_goal(chat_id: int, quest_id: int):
 def unset_daily_goal(chat_id: int, quest_id: int):
     today = date.today().isoformat()
     with get_db() as conn:
-        conn.execute(
-            "DELETE FROM daily_goals WHERE chat_id = ? AND quest_id = ? AND date = ?",
+        cur = conn.cursor()
+        cur.execute(
+            "DELETE FROM daily_goals WHERE chat_id = %s AND quest_id = %s AND date = %s",
             (chat_id, quest_id, today)
         )
-        conn.execute(
-            "UPDATE quests SET pinned = 0 WHERE id = ? AND chat_id = ?",
+        cur.execute(
+            "UPDATE quests SET pinned = 0 WHERE id = %s AND chat_id = %s",
             (quest_id, chat_id)
         )
 
@@ -347,27 +363,30 @@ def unset_daily_goal(chat_id: int, quest_id: int):
 def get_daily_goals(chat_id: int) -> List[int]:
     today = date.today().isoformat()
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT quest_id FROM daily_goals WHERE chat_id = ? AND date = ?",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT quest_id FROM daily_goals WHERE chat_id = %s AND date = %s",
             (chat_id, today)
-        ).fetchall()
-        return [r["quest_id"] for r in rows]
+        )
+        return [r["quest_id"] for r in cur.fetchall()]
 
 
 def clear_old_pins(chat_id: int):
     """Unpin quests whose goal date has passed."""
     today = date.today().isoformat()
     with get_db() as conn:
-        old = conn.execute(
-            "SELECT quest_id FROM daily_goals WHERE chat_id = ? AND date < ?",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT quest_id FROM daily_goals WHERE chat_id = %s AND date < %s",
             (chat_id, today)
-        ).fetchall()
+        )
+        old = cur.fetchall()
         for row in old:
-            conn.execute(
-                "UPDATE quests SET pinned = 0 WHERE id = ?", (row["quest_id"],)
+            cur.execute(
+                "UPDATE quests SET pinned = 0 WHERE id = %s", (row["quest_id"],)
             )
-        conn.execute(
-            "DELETE FROM daily_goals WHERE chat_id = ? AND date < ?",
+        cur.execute(
+            "DELETE FROM daily_goals WHERE chat_id = %s AND date < %s",
             (chat_id, today)
         )
 
@@ -380,19 +399,20 @@ def get_due_reminders(within_minutes: int = 60) -> List[Dict]:
     cutoff  = (now + timedelta(minutes=within_minutes)).isoformat()
     now_iso = now.isoformat()
     with get_db() as conn:
-        rows = conn.execute(
+        cur = conn.cursor()
+        cur.execute(
             "SELECT * FROM quests WHERE due_date IS NOT NULL "
-            "AND due_date <= ? AND due_date >= ? "
+            "AND due_date <= %s AND due_date >= %s "
             "AND reminder_sent = 0 AND status NOT IN ('done','dropped','archived')",
             (cutoff, now_iso[:10])
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def mark_reminder_sent(quest_id: int):
     with get_db() as conn:
-        conn.execute(
-            "UPDATE quests SET reminder_sent = 1 WHERE id = ?", (quest_id,)
+        conn.cursor().execute(
+            "UPDATE quests SET reminder_sent = 1 WHERE id = %s", (quest_id,)
         )
 
 
@@ -401,38 +421,42 @@ def mark_reminder_sent(quest_id: int):
 def get_completed_today(chat_id: int) -> List[Dict]:
     today = date.today().isoformat()
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM quests WHERE chat_id = ? AND status = 'done' AND completed_at LIKE ?",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM quests WHERE chat_id = %s AND status = 'done' AND completed_at LIKE %s",
             (chat_id, f"{today}%")
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def get_completed_on(chat_id: int, day_iso: str) -> List[Dict]:
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM quests WHERE chat_id = ? AND status = 'done' AND completed_at LIKE ?",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM quests WHERE chat_id = %s AND status = 'done' AND completed_at LIKE %s",
             (chat_id, f"{day_iso}%")
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def get_completed_this_week(chat_id: int) -> List[Dict]:
     today    = date.today()
     monday   = today - timedelta(days=today.weekday())
     with get_db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM quests WHERE chat_id = ? AND status = 'done' "
-            "AND completed_at >= ? ORDER BY completed_at DESC",
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM quests WHERE chat_id = %s AND status = 'done' "
+            "AND completed_at >= %s ORDER BY completed_at DESC",
             (chat_id, monday.isoformat())
-        ).fetchall()
-        return [dict(r) for r in rows]
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def archive_done_quests(chat_id: int) -> int:
     with get_db() as conn:
-        cur = conn.execute(
-            "UPDATE quests SET status = 'archived' WHERE chat_id = ? AND status = 'done'",
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE quests SET status = 'archived' WHERE chat_id = %s AND status = 'done'",
             (chat_id,)
         )
         return cur.rowcount
@@ -442,9 +466,90 @@ def archive_done_quests(chat_id: int) -> int:
 
 def gcal_event_exists(chat_id: int, gcal_event_id: str) -> bool:
     with get_db() as conn:
-        row = conn.execute(
-            "SELECT id FROM quests WHERE chat_id = ? AND gcal_event_id = ? "
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT id FROM quests WHERE chat_id = %s AND gcal_event_id = %s "
             "AND status NOT IN ('dropped','archived')",
             (chat_id, gcal_event_id)
-        ).fetchone()
-        return row is not None
+        )
+        return cur.fetchone() is not None
+
+
+# ─── Web login tokens (magic link) ───────────────────────────────────────────
+
+def create_login_token(chat_id: int, ttl_minutes: int = 10) -> str:
+    token      = secrets.token_urlsafe(24)
+    now        = datetime.now()
+    expires_at = (now + timedelta(minutes=ttl_minutes)).isoformat()
+    with get_db() as conn:
+        conn.cursor().execute(
+            "INSERT INTO web_login_tokens (token, chat_id, created_at, expires_at) "
+            "VALUES (%s, %s, %s, %s)",
+            (token, chat_id, now.isoformat(), expires_at)
+        )
+    return token
+
+
+def consume_login_token(token: str) -> Optional[int]:
+    now_iso = datetime.now().isoformat()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT chat_id FROM web_login_tokens WHERE token = %s "
+            "AND used_at IS NULL AND expires_at > %s",
+            (token, now_iso)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        cur.execute(
+            "UPDATE web_login_tokens SET used_at = %s WHERE token = %s",
+            (now_iso, token)
+        )
+        return row["chat_id"]
+
+
+# ─── Shares ──────────────────────────────────────────────────────────────────
+
+def create_share(chat_id: int, kind: str, quest_id: int = None,
+                  expires_in_days: int = None) -> str:
+    token      = secrets.token_urlsafe(16)
+    now        = datetime.now()
+    expires_at = (now + timedelta(days=expires_in_days)).isoformat() if expires_in_days else None
+    with get_db() as conn:
+        conn.cursor().execute(
+            "INSERT INTO shares (token, chat_id, kind, quest_id, created_at, expires_at) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (token, chat_id, kind, quest_id, now.isoformat(), expires_at)
+        )
+    return token
+
+
+def get_share(token: str) -> Optional[Dict]:
+    now_iso = datetime.now().isoformat()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM shares WHERE token = %s AND revoked = 0 "
+            "AND (expires_at IS NULL OR expires_at > %s)",
+            (token, now_iso)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def list_shares(chat_id: int) -> List[Dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM shares WHERE chat_id = %s AND revoked = 0 ORDER BY created_at DESC",
+            (chat_id,)
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def revoke_share(token: str):
+    with get_db() as conn:
+        conn.cursor().execute(
+            "UPDATE shares SET revoked = 1 WHERE token = %s", (token,)
+        )

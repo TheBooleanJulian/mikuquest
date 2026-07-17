@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% from "_quest_row.html" import quest_row %}
+{% block title %}MiguQuest — Your Stage{% endblock %}
+{% block nav %}
+<nav>
+  <a href="/app">Board</a>
+  <a href="/app/week">Week</a>
+  <a href="/logout">Logout</a>
+</nav>
+{% endblock %}
+{% block content %}
+<div class="card stage-header">
+  <h1>Lv.{{ player.level }} {{ title }}</h1>
+  <p>🔥 {{ player.streak_days }}-day streak &nbsp;•&nbsp; {{ player.total_xp }} XP</p>
+  <div class="xpbar"><div class="xpbar-fill" style="width: {{ ((200 - to_next) / 200 * 100) | round(1) }}%"></div></div>
+  <p class="muted">{{ to_next }} XP to next stage</p>
+</div>
+
+{% if share_link %}
+<div class="card share-toast">
+  🔗 Share link ready: <a href="{{ share_link }}">{{ share_link }}</a>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>➕ New Quest</h2>
+  <form method="post" action="/app/quest" class="inline-form">
+    <input type="text" name="text" placeholder="!h Fix bug due:tomorrow repeat:weekly" required>
+    <button type="submit" class="primary">Add</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>📥 Todo ({{ todo|length }})</h2>
+  <ul class="quest-list">
+    {% for q in todo %}{{ quest_row(q, goal_ids, editable=True) }}{% endfor %}
+    {% if not todo %}<li class="empty">Stage is clear~ Add a new quest to begin the show!</li>{% endif %}
+  </ul>
+</div>
+
+<div class="card">
+  <h2>⚡ In Progress ({{ in_progress|length }})</h2>
+  <ul class="quest-list">
+    {% for q in in_progress %}{{ quest_row(q, goal_ids, editable=True) }}{% endfor %}
+    {% if not in_progress %}<li class="empty">— Nothing performing right now —</li>{% endif %}
+  </ul>
+</div>
+
+<div class="card">
+  <h2>✅ Done Today ({{ done_today|length }})</h2>
+  <ul class="quest-list">
+    {% for q in done_today %}
+    <li class="quest done"><span class="text">{{ q.text }}</span> <span class="xp">+{{ q.xp_value }}xp</span></li>
+    {% endfor %}
+    {% if not done_today %}<li class="empty">— No completions yet~ —</li>{% endif %}
+  </ul>
+  {% if done_today %}<p class="muted">+{{ today_xp }} XP earned today 🎵</p>{% endif %}
+</div>
+
+<div class="card">
+  <form method="post" action="/app/share" class="inline-form">
+    <input type="hidden" name="kind" value="board">
+    <input type="hidden" name="return_to" value="/app">
+    <button type="submit">🔗 Share this board</button>
+  </form>
+</div>
+{% endblock %}
