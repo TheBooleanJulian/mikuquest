@@ -730,7 +730,8 @@ async def web_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🌐 <b>Your MiguQuest login link~</b>\n\n"
         f"{base}/auth/{token}\n\n"
         f"<i>Valid for 10 minutes, one-time use. Don't share this one!</i>",
-        parse_mode=ParseMode.HTML
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
 
 
@@ -750,7 +751,8 @@ async def share_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{base}/s/{token}\n\n"
         f"<i>Anyone with this link can view a read-only snapshot. "
         f"Send /share again to make a new one, or ask to have it revoked.</i>",
-        parse_mode=ParseMode.HTML
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
 
 
@@ -763,7 +765,8 @@ async def _share_reply(chat_id: int, kind: str, quest_id: Optional[int], send_fn
     label = f"quest #{quest_id}" if quest_id else kind
     await send_fn(
         f"🔗 <b>Public share link ({label})~</b>\n\n{base}/s/{token}",
-        parse_mode=ParseMode.HTML
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
     )
 
 
