@@ -16,6 +16,7 @@ from handlers import (
     week_command, goals_command,
     gcalauth_command, gcalcode_command, gcalsync_command,
     web_command, share_command,
+    backlog_command, pomo_command,
     message_handler, callback_handler,
 )
 from scheduler import setup_scheduler
@@ -71,6 +72,9 @@ def main():
     # Web
     app.add_handler(CommandHandler("web",        web_command))
     app.add_handler(CommandHandler("share",      share_command))
+    # Backlog & Pomodoro
+    app.add_handler(CommandHandler("backlog",    backlog_command))
+    app.add_handler(CommandHandler("pomo",       pomo_command))
 
     # Callbacks & messages
     app.add_handler(CallbackQueryHandler(callback_handler))

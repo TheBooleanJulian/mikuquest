@@ -1,7 +1,7 @@
 import re
 import os
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Optional
 
 import dateparser
@@ -131,6 +131,7 @@ def fmt_due(due_iso: str) -> str:
 
 def render_board(chat_id: int, tag_filter: str = None):
     db.clear_old_pins(chat_id)
+    db.ensure_daily_rollover(chat_id)
     player  = db.get_or_create_player(chat_id)
     level   = player["level"]
     title   = db.get_title(level)
@@ -143,6 +144,8 @@ def render_board(chat_id: int, tag_filter: str = None):
     todo        = db.get_quests(chat_id, status="todo",        tag=tag_filter)
     in_progress = db.get_quests(chat_id, status="in_progress", tag=tag_filter)
     done_today  = db.get_completed_today(chat_id)
+    backlog_n   = len(db.get_quests(chat_id, status="backlog"))
+    active_pomo = db.get_active_pomodoro(chat_id)
 
     tag_note = f"  <i>filter: {tag_filter}</i>" if tag_filter else ""
 
@@ -153,6 +156,10 @@ def render_board(chat_id: int, tag_filter: str = None):
         f"║  [{xp_bar(xp)}] {to_next} XP to next stage",
         f"╚══════════════════════════╝{tag_note}",
     ]
+
+    if active_pomo:
+        mins_left = max(0, int((datetime.fromisoformat(active_pomo["ends_at"]) - datetime.now()).total_seconds() // 60))
+        lines.append(f"\n🍅 <i>Focus session running — {mins_left}m left</i>")
 
     keyboard = []
 
@@ -199,6 +206,8 @@ def render_board(chat_id: int, tag_filter: str = None):
     else:
         lines.append("  — No completions yet~ —")
 
+    lines.append(f"\n📦 <i>Backlog: {backlog_n} quest(s) waiting</i>")
+
     keyboard.append([
         InlineKeyboardButton("🔄 Refresh",        callback_data="board:refresh"),
         InlineKeyboardButton("➕ New Quest",       callback_data="board:new"),
@@ -209,6 +218,7 @@ def render_board(chat_id: int, tag_filter: str = None):
         InlineKeyboardButton("📅 Week",           callback_data="board:week"),
     ])
     keyboard.append([
+        InlineKeyboardButton(f"📦 Backlog ({backlog_n})", callback_data="backlog:list"),
         InlineKeyboardButton("🔗 Share Stage",    callback_data="share:board"),
     ])
 
@@ -262,7 +272,10 @@ def quest_card_markup(quest: dict, is_goal: bool = False) -> InlineKeyboardMarku
         InlineKeyboardButton("⭐ Set as Focus", callback_data=f"goal:set:{qid}")
     )
     rows.append([goal_btn])
-    rows.append([InlineKeyboardButton("🔗 Share Quest", callback_data=f"share:quest:{qid}")])
+    rows.append([
+        InlineKeyboardButton("🍅 Focus 25m", callback_data=f"pomo:start:{qid}"),
+        InlineKeyboardButton("🔗 Share Quest", callback_data=f"share:quest:{qid}"),
+    ])
     rows.append([InlineKeyboardButton("← Back to Stage", callback_data="board:refresh")])
     return InlineKeyboardMarkup(rows)
 
@@ -401,6 +414,15 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<code>/goals</code>                 — Set today's focus (⭐ up to 3)\n"
         "<code>/week</code>                  — Weekly performance summary\n"
         "<code>/tag #accurova</code>         — Filter board by tag\n\n"
+        "<b>Backlog</b>\n"
+        "<code>/backlog</code>               — View unfinished quests swept from previous days\n"
+        "<i>Each morning, today's board starts fresh — unfinished quests move to\n"
+        "the backlog, and the top 5 get auto-pulled back in~</i>\n\n"
+        "<b>Pomodoro</b>\n"
+        "<code>/pomo</code>                  — Start a 25-min freeform focus session\n"
+        "<code>/pomo &lt;id&gt;</code>             — Focus session tied to a quest\n"
+        "<code>/pomo &lt;id&gt; 45</code>          — Custom duration (10–90 min)\n"
+        "<i>+15 XP bonus per completed session~</i>\n\n"
         "<b>Notes</b>\n"
         "<code>/note &lt;id&gt; &lt;text&gt;</code>   — Add context to a quest\n"
         "Reply to a quest card             — Also adds a note~\n\n"
@@ -562,6 +584,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today_xp   = sum(q["xp_value"] for q in done_today)
     title      = db.get_title(player["level"])
     to_next    = 200 - (player["total_xp"] % 200)
+    pomo       = db.get_today_pomodoro_stats(chat_id)
     await update.message.reply_text(
         f"🎵 <b>Concert Stats</b>\n"
         f"━━━━━━━━━━━━━━━━━\n"
@@ -570,7 +593,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"[{xp_bar(player['total_xp'])}] {to_next} XP to next stage\n\n"
         f"🔥 Streak: <b>{player['streak_days']} days</b>\n"
         f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
-        f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>",
+        f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>\n"
+        f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP",
         parse_mode=ParseMode.HTML
     )
 
@@ -616,6 +640,33 @@ async def clear_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     count   = db.archive_done_quests(chat_id)
     await update.message.reply_text(f"🗂 Archived {count} cleared quest(s). Clean stage~ ✨")
+
+
+# ─── Backlog ──────────────────────────────────────────────────────────────────
+
+def _backlog_view(chat_id: int):
+    db.ensure_daily_rollover(chat_id)
+    quests = db.get_quests(chat_id, status="backlog")[:15]
+    lines  = ["📦 <b>Backlog</b>", "<i>Unfinished quests swept from previous days~</i>", ""]
+    kb     = []
+    if quests:
+        for q in quests:
+            lbl = PRIORITY_LABELS[q["priority"]]
+            lines.append(f"[{lbl}] {trunc(q['text'], 40)}  <i>{q['tag']}</i>")
+            kb.append([InlineKeyboardButton(
+                f"⬆ Pull #{q['id']}: {trunc(q['text'], 26)}",
+                callback_data=f"backlog:pull:{q['id']}"
+            )])
+    else:
+        lines.append("  — Backlog is empty~ Nothing waiting! —")
+    kb.append([InlineKeyboardButton("← Back to Stage", callback_data="board:refresh_new")])
+    return "\n".join(lines), InlineKeyboardMarkup(kb)
+
+
+async def backlog_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id  = update.effective_chat.id
+    text, kb = _backlog_view(chat_id)
+    await update.message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
 
 
 async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -710,6 +761,51 @@ async def _send_goals_picker(chat_id: int, send_fn, edit_fn=None):
         await edit_fn(txt, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
     else:
         await send_fn(txt, parse_mode=ParseMode.HTML, reply_markup=InlineKeyboardMarkup(kb))
+
+
+# ─── Pomodoro ─────────────────────────────────────────────────────────────────
+
+async def _start_pomodoro(chat_id: int, quest_id: Optional[int],
+                          duration: int, send_fn):
+    session = db.start_pomodoro(chat_id, quest_id=quest_id, duration_minutes=duration)
+    quest_note = ""
+    if quest_id:
+        quest = db.get_quest(quest_id)
+        if quest:
+            quest_note = f"\nQuest: <b>{trunc(quest['text'], 60)}</b>"
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("⏹ Cancel", callback_data=f"pomo:cancel:{session['id']}")
+    ]])
+    await send_fn(
+        f"🍅 <b>Focus session started~</b>\n"
+        f"{session['duration_minutes']}:00 on the clock. I'll ping you when it's done!"
+        f"{quest_note}",
+        parse_mode=ParseMode.HTML,
+        reply_markup=kb,
+    )
+
+
+async def pomo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    args    = context.args or []
+    quest_id: Optional[int] = None
+    duration = db.POMO_DEFAULT_MINUTES
+
+    if len(args) >= 1:
+        try:
+            first = int(args[0])
+            quest = db.get_quest(first)
+            if quest and quest["chat_id"] == chat_id:
+                quest_id = first
+                if len(args) >= 2:
+                    duration = int(args[1])
+            else:
+                duration = first
+        except ValueError:
+            await update.message.reply_text("Usage: /pomo [quest_id] [minutes]")
+            return
+
+    await _start_pomodoro(chat_id, quest_id, duration, send_fn=update.message.reply_text)
 
 
 # ─── Web (magic login + share links) ─────────────────────────────────────────
@@ -978,6 +1074,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         today_xp   = sum(q["xp_value"] for q in done_today)
         title      = db.get_title(player["level"])
         to_next    = 200 - (player["total_xp"] % 200)
+        pomo       = db.get_today_pomodoro_stats(chat_id)
         text = (
             f"🎵 <b>Concert Stats</b>\n"
             f"━━━━━━━━━━━━━━━━━\n"
@@ -986,7 +1083,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"[{xp_bar(player['total_xp'])}] {to_next} XP to next stage\n\n"
             f"🔥 Streak: <b>{player['streak_days']} days</b>\n"
             f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
-            f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>"
+            f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>\n"
+            f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP"
         )
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("← Back to Stage", callback_data="board:refresh")]])
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -1004,6 +1102,29 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         kind = data.split(":")[1]
         if kind in SHARE_KINDS:
             await _share_reply(chat_id, kind, None, send_fn=query.message.reply_text)
+
+    # ── Backlog ──────────────────────────────────────────────────────────────────
+    elif data == "backlog:list":
+        text, kb = _backlog_view(chat_id)
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+    elif data.startswith("backlog:pull:"):
+        quest_id = int(data.split(":")[2])
+        db.pull_from_backlog(chat_id, quest_id)
+        text, kb = _backlog_view(chat_id)
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
+
+    # ── Pomodoro ─────────────────────────────────────────────────────────────────
+    elif data.startswith("pomo:start:"):
+        quest_id = int(data.split(":")[2])
+        await _start_pomodoro(chat_id, quest_id, db.POMO_DEFAULT_MINUTES,
+                               send_fn=query.message.reply_text)
+
+    elif data.startswith("pomo:cancel:"):
+        session_id = int(data.split(":")[2])
+        session    = db.cancel_pomodoro(chat_id, session_id)
+        if session and session["status"] == "cancelled":
+            await query.edit_message_text("⏹ Focus session cancelled~ No worries, try again anytime.")
 
 
 async def _refresh_goals_picker(query, chat_id: int):

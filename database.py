@@ -11,6 +11,12 @@ import psycopg2.pool
 DATABASE_URL = os.environ.get("DATABASE_URL")
 XP_MAP = {"critical": 40, "high": 30, "medium": 20, "low": 10}
 
+BACKLOG_AUTOPULL_N  = 5
+POMO_DEFAULT_MINUTES = 25
+POMO_MIN_MINUTES    = 10
+POMO_MAX_MINUTES    = 90
+POMO_XP_BONUS       = 15
+
 _pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
 
 
@@ -101,7 +107,22 @@ def init_db():
                 expires_at  TEXT,
                 revoked     INTEGER DEFAULT 0
             );
+
+            CREATE TABLE IF NOT EXISTS pomodoro_sessions (
+                id                SERIAL PRIMARY KEY,
+                chat_id           BIGINT  NOT NULL,
+                quest_id          INTEGER,
+                duration_minutes  INTEGER NOT NULL DEFAULT 25,
+                started_at        TEXT    NOT NULL,
+                ends_at            TEXT    NOT NULL,
+                status            TEXT    NOT NULL DEFAULT 'running',
+                xp_awarded        INTEGER DEFAULT 0,
+                completed_at      TEXT
+            );
         """)
+        # Additive migrations for columns added after the initial Postgres rollout.
+        cur.execute("ALTER TABLE quests ADD COLUMN IF NOT EXISTS backlogged_at TEXT")
+        cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS last_rollover_date TEXT")
 
 
 # ─── Player ────────────────────────────────────────────────────────────────────
@@ -391,6 +412,60 @@ def clear_old_pins(chat_id: int):
         )
 
 
+# ─── Backlog & Daily Rollover ─────────────────────────────────────────────────
+
+def ensure_daily_rollover(chat_id: int) -> List[Dict]:
+    """Sweep yesterday's unfinished quests to backlog and auto-pull the top N back.
+
+    Idempotent per calendar day via player.last_rollover_date — safe to call from
+    every board-render entry point (bot + web) as well as the 6AM cron job.
+    """
+    today  = date.today().isoformat()
+    player = get_or_create_player(chat_id)
+    if player.get("last_rollover_date") == today:
+        return []
+
+    now = datetime.now().isoformat()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE quests SET status = 'backlog', backlogged_at = %s "
+            "WHERE chat_id = %s AND status IN ('todo', 'in_progress')",
+            (now, chat_id)
+        )
+        cur.execute(
+            "SELECT * FROM quests WHERE chat_id = %s AND status = 'backlog' "
+            "ORDER BY CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 "
+            "WHEN 'medium' THEN 2 WHEN 'low' THEN 3 END, backlogged_at ASC "
+            "LIMIT %s",
+            (chat_id, BACKLOG_AUTOPULL_N)
+        )
+        to_pull = [dict(r) for r in cur.fetchall()]
+        for quest in to_pull:
+            cur.execute(
+                "UPDATE quests SET status = 'todo', backlogged_at = NULL WHERE id = %s",
+                (quest["id"],)
+            )
+        cur.execute(
+            "UPDATE player SET last_rollover_date = %s WHERE chat_id = %s",
+            (today, chat_id)
+        )
+    return to_pull
+
+
+def pull_from_backlog(chat_id: int, quest_id: int) -> Optional[Dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE quests SET status = 'todo', backlogged_at = NULL "
+            "WHERE id = %s AND chat_id = %s AND status = 'backlog'",
+            (quest_id, chat_id)
+        )
+        cur.execute("SELECT * FROM quests WHERE id = %s", (quest_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
 # ─── Due date / reminders ────────────────────────────────────────────────────
 
 def get_due_reminders(within_minutes: int = 60) -> List[Dict]:
@@ -553,3 +628,103 @@ def revoke_share(token: str):
         conn.cursor().execute(
             "UPDATE shares SET revoked = 1 WHERE token = %s", (token,)
         )
+
+
+# ─── Pomodoro ────────────────────────────────────────────────────────────────
+
+def start_pomodoro(chat_id: int, quest_id: int = None,
+                    duration_minutes: int = POMO_DEFAULT_MINUTES) -> Dict:
+    duration_minutes = max(POMO_MIN_MINUTES, min(POMO_MAX_MINUTES, duration_minutes))
+    now     = datetime.now()
+    ends_at = now + timedelta(minutes=duration_minutes)
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO pomodoro_sessions (chat_id, quest_id, duration_minutes, "
+            "started_at, ends_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            (chat_id, quest_id, duration_minutes, now.isoformat(), ends_at.isoformat())
+        )
+        session_id = cur.fetchone()["id"]
+        cur.execute("SELECT * FROM pomodoro_sessions WHERE id = %s", (session_id,))
+        return dict(cur.fetchone())
+
+
+def get_pomodoro(session_id: int) -> Optional[Dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM pomodoro_sessions WHERE id = %s", (session_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def cancel_pomodoro(chat_id: int, session_id: int) -> Optional[Dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE pomodoro_sessions SET status = 'cancelled' "
+            "WHERE id = %s AND chat_id = %s AND status = 'running'",
+            (session_id, chat_id)
+        )
+        cur.execute("SELECT * FROM pomodoro_sessions WHERE id = %s", (session_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_active_pomodoro(chat_id: int) -> Optional[Dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM pomodoro_sessions WHERE chat_id = %s AND status = 'running' "
+            "ORDER BY started_at DESC LIMIT 1",
+            (chat_id,)
+        )
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def get_due_pomodoros() -> List[Dict]:
+    now_iso = datetime.now().isoformat()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM pomodoro_sessions WHERE status = 'running' AND ends_at <= %s",
+            (now_iso,)
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def complete_pomodoro(chat_id: int, session_id: int) -> Optional[Dict]:
+    now = datetime.now().isoformat()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE pomodoro_sessions SET status = 'completed', completed_at = %s, "
+            "xp_awarded = %s WHERE id = %s AND status = 'running'",
+            (now, POMO_XP_BONUS, session_id)
+        )
+        awarded = cur.rowcount > 0
+        cur.execute("SELECT * FROM pomodoro_sessions WHERE id = %s", (session_id,))
+        session = cur.fetchone()
+        if not session:
+            return None
+        session = dict(session)
+
+    if awarded:
+        player    = get_or_create_player(chat_id)
+        new_xp    = player["total_xp"] + POMO_XP_BONUS
+        new_level = compute_level(new_xp)
+        update_player(chat_id, total_xp=new_xp, level=new_level)
+    return session
+
+
+def get_today_pomodoro_stats(chat_id: int) -> Dict:
+    today = date.today().isoformat()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) AS count, COALESCE(SUM(duration_minutes), 0) AS minutes, "
+            "COALESCE(SUM(xp_awarded), 0) AS xp FROM pomodoro_sessions "
+            "WHERE chat_id = %s AND status = 'completed' AND completed_at LIKE %s",
+            (chat_id, f"{today}%")
+        )
+        return dict(cur.fetchone())

@@ -1,4 +1,4 @@
-{% macro quest_row(q, goal_ids, editable=False) %}
+{% macro quest_row(q, goal_ids, editable=False, mode="today") %}
 <li class="quest priority-{{ q.priority }}">
   <div class="quest-main">
     <span class="icon">{{ STATUS_ICONS[q.status] }}</span>
@@ -8,13 +8,23 @@
     <span class="due">{{ fmt_due(q.due_date) }}</span>
     <span class="tag">{{ q.tag }}</span>
   </div>
-  {% if editable %}
+  {% if mode == "backlog" %}
+  <div class="quest-actions">
+    <form method="post" action="/app/quest/{{ q.id }}/pull-backlog"><button class="primary">⬆ Pull to Today</button></form>
+    <form method="post" action="/app/quest/{{ q.id }}/drop"><button class="danger">🗑</button></form>
+  </div>
+  {% elif editable %}
   <div class="quest-actions">
     {% if q.status != "in_progress" %}
     <form method="post" action="/app/quest/{{ q.id }}/begin"><button>▶ Begin</button></form>
     {% endif %}
     <form method="post" action="/app/quest/{{ q.id }}/done"><button class="primary">✅ +{{ q.xp_value }}xp</button></form>
     <form method="post" action="/app/quest/{{ q.id }}/drop"><button class="danger">🗑</button></form>
+    <form method="post" action="/app/pomo/start">
+      <input type="hidden" name="quest_id" value="{{ q.id }}">
+      <input type="hidden" name="duration" value="25">
+      <button type="submit">🍅</button>
+    </form>
     <form method="post" action="/app/share">
       <input type="hidden" name="kind" value="quest">
       <input type="hidden" name="quest_id" value="{{ q.id }}">

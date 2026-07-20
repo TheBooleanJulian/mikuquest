@@ -42,6 +42,7 @@ async def send_daily_summary(app: Application):
     for chat_id in chat_ids:
         try:
             db.clear_old_pins(chat_id)
+            pulled      = db.ensure_daily_rollover(chat_id)
             player      = db.get_or_create_player(chat_id)
             done_yday   = db.get_completed_on(chat_id, yesterday)
             yday_xp     = sum(q["xp_value"] for q in done_yday)
@@ -69,8 +70,10 @@ async def send_daily_summary(app: Application):
             lines += [
                 f"🔥 Streak: <b>{player['streak_days']} days</b>",
                 "",
-                f"<b>TODAY'S SETLIST ({len(active)})</b>",
             ]
+            if pulled:
+                lines.append(f"📥 <b>{len(pulled)} pulled from backlog</b> to kick off today~")
+            lines.append(f"<b>TODAY'S SETLIST ({len(active)})</b>")
 
             if active:
                 crit_n = sum(1 for q in active if q["priority"] == "critical")
@@ -152,6 +155,34 @@ async def send_weekly_summary(app: Application):
             logger.error(f"[Weekly] {chat_id}: {e}")
 
 
+# ─── Pomodoro Sweep (every minute) ────────────────────────────────────────────
+
+async def pomo_sweep_job(app: Application):
+    due = db.get_due_pomodoros()
+    for session in due:
+        try:
+            completed = db.complete_pomodoro(session["chat_id"], session["id"])
+            if not completed:
+                continue
+            quest_note = ""
+            if session.get("quest_id"):
+                quest = db.get_quest(session["quest_id"])
+                if quest:
+                    quest_note = f"\nQuest: <b>{trunc(quest['text'], 60)}</b>"
+            await app.bot.send_message(
+                chat_id=session["chat_id"],
+                text=(
+                    f"🍅 <b>Pomodoro complete!</b>  +{completed['xp_awarded']} XP\n"
+                    f"{session['duration_minutes']} minutes of focus, nailed it~ 🎵"
+                    f"{quest_note}"
+                ),
+                parse_mode="HTML",
+            )
+            logger.info(f"[Pomodoro] {session['chat_id']}: session {session['id']} completed")
+        except Exception as e:
+            logger.error(f"[Pomodoro] session {session['id']}: {e}")
+
+
 # ─── Setup ────────────────────────────────────────────────────────────────────
 
 def setup_scheduler(app: Application):
@@ -177,6 +208,11 @@ def setup_scheduler(app: Application):
         send_weekly_summary, CronTrigger(day_of_week="sun", hour=20, minute=0, timezone=SGT),
         args=[app], id="weekly_summary", replace_existing=True,
     )
+    # Pomodoro sweep — every minute
+    scheduler.add_job(
+        pomo_sweep_job, CronTrigger(minute="*", timezone=SGT),
+        args=[app], id="pomo_sweep", replace_existing=True,
+    )
 
     scheduler.start()
-    logger.info("[Scheduler] Jobs: GCal sync 05:50 | Debrief 06:00 | Reminders :00/:30 | Weekly Sun 20:00 — all SGT")
+    logger.info("[Scheduler] Jobs: GCal sync 05:50 | Debrief 06:00 | Reminders :00/:30 | Weekly Sun 20:00 | Pomodoro sweep :every min — all SGT")

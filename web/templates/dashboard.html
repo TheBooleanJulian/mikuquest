@@ -4,6 +4,7 @@
 {% block nav %}
 <nav>
   <a href="/app">Board</a>
+  <a href="/app/backlog">Backlog{% if backlog_n %} ({{ backlog_n }}){% endif %}</a>
   <a href="/app/week">Week</a>
   <a href="/logout">Logout</a>
 </nav>
@@ -21,6 +22,27 @@
   🔗 Share link ready: <a href="{{ share_link }}">{{ share_link }}</a>
 </div>
 {% endif %}
+
+<div class="card pomo-card">
+  <h2>🍅 Pomodoro</h2>
+  {% if active_pomo %}
+  <p class="pomo-countdown" data-ends-at="{{ active_pomo.ends_at }}">--:--</p>
+  <form method="post" action="/app/pomo/{{ active_pomo.id }}/cancel">
+    <button type="submit" class="danger">⏹ Cancel session</button>
+  </form>
+  {% else %}
+  <form method="post" action="/app/pomo/start" class="inline-form">
+    <select name="quest_id">
+      <option value="">Freeform (no quest)</option>
+      {% for q in todo + in_progress %}
+      <option value="{{ q.id }}">#{{ q.id }} — {{ trunc(q.text, 40) }}</option>
+      {% endfor %}
+    </select>
+    <input type="number" name="duration" value="25" min="10" max="90" style="width:5em">
+    <button type="submit" class="primary">Start Focus</button>
+  </form>
+  {% endif %}
+</div>
 
 <div class="card">
   <h2>➕ New Quest</h2>
@@ -64,4 +86,24 @@
     <button type="submit">🔗 Share this board</button>
   </form>
 </div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var el = document.querySelector(".pomo-countdown");
+  if (!el) return;
+  var endsAt = new Date(el.dataset.endsAt + "Z").getTime();
+  function tick() {
+    var remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+    var m = String(Math.floor(remaining / 60)).padStart(2, "0");
+    var s = String(remaining % 60).padStart(2, "0");
+    el.textContent = m + ":" + s;
+    if (remaining <= 0) {
+      el.textContent = "00:00 — refresh to see your XP!";
+    }
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+</script>
 {% endblock %}

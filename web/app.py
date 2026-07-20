@@ -74,6 +74,7 @@ def safe_local_path(path: str, default: str = "/app") -> str:
 def board_snapshot(chat_id: int, tag_filter: str = None, mutate: bool = True) -> dict:
     if mutate:
         db.clear_old_pins(chat_id)
+        db.ensure_daily_rollover(chat_id)
     player  = db.get_or_create_player(chat_id)
     title   = db.get_title(player["level"])
     goal_ids = db.get_daily_goals(chat_id)
@@ -82,6 +83,8 @@ def board_snapshot(chat_id: int, tag_filter: str = None, mutate: bool = True) ->
     in_progress = db.get_quests(chat_id, status="in_progress", tag=tag_filter)
     done_today  = db.get_completed_today(chat_id)
     today_xp    = sum(q["xp_value"] for q in done_today)
+    backlog_n   = len(db.get_quests(chat_id, status="backlog"))
+    active_pomo = db.get_active_pomodoro(chat_id)
 
     return {
         "player": player,
@@ -93,7 +96,14 @@ def board_snapshot(chat_id: int, tag_filter: str = None, mutate: bool = True) ->
         "done_today": done_today,
         "today_xp": today_xp,
         "tag_filter": tag_filter,
+        "backlog_n": backlog_n,
+        "active_pomo": active_pomo,
     }
+
+
+def backlog_snapshot(chat_id: int) -> dict:
+    db.ensure_daily_rollover(chat_id)
+    return {"backlog": db.get_quests(chat_id, status="backlog")}
 
 
 def week_snapshot(chat_id: int) -> dict:
@@ -212,6 +222,36 @@ def week_page(request: Request, shared: str = None):
     if shared:
         ctx["share_link"] = str(request.url_for("public_share", token=shared))
     return templates.TemplateResponse("week.html", ctx)
+
+
+@app.get("/app/backlog", response_class=HTMLResponse)
+def backlog_page(request: Request):
+    chat_id = require_chat_id(request)
+    ctx = backlog_snapshot(chat_id)
+    ctx["request"] = request
+    return templates.TemplateResponse("backlog.html", ctx)
+
+
+@app.post("/app/quest/{quest_id}/pull-backlog", dependencies=[Depends(require_same_origin)])
+def pull_backlog(request: Request, quest_id: int):
+    chat_id = require_chat_id(request)
+    db.pull_from_backlog(chat_id, quest_id)
+    return RedirectResponse("/app/backlog", status_code=303)
+
+
+@app.post("/app/pomo/start", dependencies=[Depends(require_same_origin)])
+def start_pomo(request: Request, quest_id: str = Form(None), duration: int = Form(db.POMO_DEFAULT_MINUTES)):
+    chat_id = require_chat_id(request)
+    qid = int(quest_id) if quest_id else None
+    db.start_pomodoro(chat_id, quest_id=qid, duration_minutes=duration)
+    return RedirectResponse("/app", status_code=303)
+
+
+@app.post("/app/pomo/{session_id}/cancel", dependencies=[Depends(require_same_origin)])
+def cancel_pomo(request: Request, session_id: int):
+    chat_id = require_chat_id(request)
+    db.cancel_pomodoro(chat_id, session_id)
+    return RedirectResponse("/app", status_code=303)
 
 
 @app.post("/app/share", dependencies=[Depends(require_same_origin)])

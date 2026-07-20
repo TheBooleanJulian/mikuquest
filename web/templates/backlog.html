@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_quest_row.html" import quest_row %}
+{% block title %}MiguQuest — Backlog{% endblock %}
+{% block nav %}
+<nav>
+  <a href="/app">Board</a>
+  <a href="/app/week">Week</a>
+  <a href="/logout">Logout</a>
+</nav>
+{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>📦 Backlog</h1>
+  <p class="muted">Unfinished quests swept from previous days. Each morning the top 5 (by priority) get auto-pulled back onto today's board.</p>
+</div>
+
+<div class="card">
+  <h2>Waiting ({{ backlog|length }})</h2>
+  <ul class="quest-list">
+    {% for q in backlog %}{{ quest_row(q, [], mode="backlog") }}{% endfor %}
+    {% if not backlog %}<li class="empty">Backlog is empty~ Nothing waiting!</li>{% endif %}
+  </ul>
+</div>
+{% endblock %}
