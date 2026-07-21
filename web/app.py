@@ -74,14 +74,17 @@ def safe_local_path(path: str, default: str = "/app") -> str:
 
 
 def board_snapshot(chat_id: int, tag_filter: str = None, mutate: bool = True) -> dict:
+    daily_quest = None
     if mutate:
         db.clear_old_pins(chat_id)
         db.ensure_daily_rollover(chat_id)
+        daily_quest = db.ensure_daily_quest_for_chat(chat_id)
     player  = db.get_or_create_player(chat_id)
     title   = db.get_display_title(player)
     goal_ids = db.get_daily_goals(chat_id)
 
-    todo        = db.get_quests(chat_id, status="todo", tag=tag_filter)
+    todo        = [q for q in db.get_quests(chat_id, status="todo", tag=tag_filter)
+                   if q["source"] != "daily_miku"]
     in_progress = db.get_quests(chat_id, status="in_progress", tag=tag_filter)
     done_today  = db.get_completed_today(chat_id)
     today_xp    = sum(q["xp_value"] for q in done_today)
@@ -101,6 +104,7 @@ def board_snapshot(chat_id: int, tag_filter: str = None, mutate: bool = True) ->
         "backlog_n": backlog_n,
         "active_pomo": active_pomo,
         "helium3": player.get("helium3", 0) or 0,
+        "daily_quest": daily_quest,
     }
 
 
@@ -111,7 +115,11 @@ def backlog_snapshot(chat_id: int) -> dict:
 
 def inventory_snapshot(chat_id: int) -> dict:
     player = db.get_or_create_player(chat_id)
-    return {"items": db.get_inventory(chat_id), "helium3": player.get("helium3", 0) or 0}
+    return {
+        "materials": db.get_inventory(chat_id, kind="material"),
+        "cosmetics": db.get_inventory(chat_id, kind="cosmetic"),
+        "helium3": player.get("helium3", 0) or 0,
+    }
 
 
 def week_snapshot(chat_id: int) -> dict:
@@ -270,6 +278,13 @@ def inventory_page(request: Request):
     return templates.TemplateResponse("inventory.html", ctx)
 
 
+@app.post("/app/cosmetics/equip", dependencies=[Depends(require_same_origin)])
+def equip_cosmetic_route(request: Request, item_id: str = Form(...)):
+    chat_id = require_chat_id(request)
+    db.equip_cosmetic(chat_id, item_id)
+    return RedirectResponse("/app/inventory", status_code=303)
+
+
 @app.get("/app/shop", response_class=HTMLResponse)
 def shop_page(request: Request, msg: str = None):
     chat_id = require_chat_id(request)
@@ -284,9 +299,7 @@ def shop_buy(request: Request, item_id: str = Form(...)):
     chat_id = require_chat_id(request)
     if item_id not in db.SHOP_ITEMS:
         raise HTTPException(status_code=400, detail="Unknown item")
-    if item_id == "streak_freeze":
-        ok = db.buy_streak_freeze(chat_id)
-    elif item_id == "custom_title":
+    if item_id == "custom_title":
         ok = db.buy_custom_title(chat_id)
     else:
         ok = False

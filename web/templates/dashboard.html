@@ -25,6 +25,16 @@
 </div>
 {% endif %}
 
+{% if daily_quest and daily_quest.status in ("todo", "in_progress") %}
+<div class="card daily-quest-card">
+  <h2>🌟 Miku's Quest of the Day <span class="muted">({{ daily_quest.category }})</span></h2>
+  <p>{{ daily_quest.text }}</p>
+  <form method="post" action="/app/quest/{{ daily_quest.id }}/done">
+    <button type="submit" class="primary">✅ +{{ daily_quest.xp_value }}xp</button>
+  </form>
+</div>
+{% endif %}
+
 <div class="card pomo-card">
   <h2>🍅 Pomodoro</h2>
   {% if active_pomo %}

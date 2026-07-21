@@ -39,11 +39,41 @@ LOOT_POOL = [
 RARITY_ICONS = {"common": "🪨", "rare": "⚙️", "epic": "💎"}
 
 SHOP_ITEMS = {
-    "streak_freeze": {"name": "🧊 Streak Freeze Token", "cost": 50,
-                       "desc": "Protects your streak once if you miss a day."},
     "custom_title":  {"name": "🎫 Custom Title Unlock", "cost": 100,
                        "desc": "Unlocks /settitle to set your own vanity title."},
 }
+
+DAILY_QUEST_XP = 35
+DAILY_QUEST_POOL = [
+    {"text": "Do a 10-minute stretch or workout",                         "category": "self-improvement"},
+    {"text": "Write down 3 things you're grateful for",                   "category": "self-improvement"},
+    {"text": "Read 10 pages of a book you've been meaning to start",      "category": "self-improvement"},
+    {"text": "Meditate or sit quietly for 5 minutes",                     "category": "self-improvement"},
+    {"text": "Learn one new word in a language you're studying",          "category": "self-improvement"},
+    {"text": "Clear your inbox to zero",                                  "category": "productive"},
+    {"text": "Tidy your desk or workspace for 5 minutes",                 "category": "productive"},
+    {"text": "Back up an important file",                                 "category": "productive"},
+    {"text": "Batch-schedule tomorrow's top 3 priorities",                "category": "productive"},
+    {"text": "Unsubscribe from 3 emails you never read",                  "category": "productive"},
+    {"text": "Send a thank-you message to someone who helped you recently", "category": "altruist"},
+    {"text": "Give a coworker or friend a genuine compliment",            "category": "altruist"},
+    {"text": "Check in on someone who's been quiet lately",               "category": "altruist"},
+    {"text": "Leave a kind review for a small business you like",         "category": "altruist"},
+    {"text": "Donate spare change or a small amount to a cause you care about", "category": "altruist"},
+]
+
+COSMETIC_SEED = [
+    ("stardust_wanderer", "✨ Stardust Wanderer",  "rare"),
+    ("moonlit_courier",   "🌙 Moonlit Courier",    "rare"),
+    ("regolith_ranger",   "🪐 Regolith Ranger",    "rare"),
+    ("vacuum_virtuoso",   "🛰️ Vacuum Virtuoso",    "rare"),
+    ("crater_champion",   "🕳️ Crater Champion",    "rare"),
+    ("lunar_legend",      "🌕 Lunar Legend",       "epic"),
+    ("helium_hoarder",    "💠 Helium Hoarder",     "epic"),
+    ("outpost_overseer",  "🏮 Outpost Overseer",   "epic"),
+    ("void_wanderer",     "🌌 Void Wanderer",      "epic"),
+    ("colony_icon",       "👑 Colony Icon",        "epic"),
+]
 
 _pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
 
@@ -156,14 +186,36 @@ def init_db():
                 rarity      TEXT   NOT NULL,
                 obtained_at TEXT   NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS daily_quests (
+                date     TEXT PRIMARY KEY,
+                text     TEXT NOT NULL,
+                category TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS cosmetics (
+                id     SERIAL PRIMARY KEY,
+                key    TEXT UNIQUE NOT NULL,
+                text   TEXT NOT NULL,
+                rarity TEXT NOT NULL DEFAULT 'rare'
+            );
         """)
         # Additive migrations for columns added after the initial Postgres rollout.
         cur.execute("ALTER TABLE quests ADD COLUMN IF NOT EXISTS backlogged_at TEXT")
+        cur.execute("ALTER TABLE quests ADD COLUMN IF NOT EXISTS daily_quest_date TEXT")
         cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS last_rollover_date TEXT")
         cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS helium3 INTEGER DEFAULT 0")
-        cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS streak_freezes INTEGER DEFAULT 0")
         cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS custom_title TEXT")
         cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS custom_title_unlocked INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE player DROP COLUMN IF EXISTS streak_freezes")
+        cur.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'material'")
+
+        for key, text, rarity in COSMETIC_SEED:
+            cur.execute(
+                "INSERT INTO cosmetics (key, text, rarity) VALUES (%s, %s, %s) "
+                "ON CONFLICT (key) DO NOTHING",
+                (key, text, rarity)
+            )
 
 
 # ─── Player ────────────────────────────────────────────────────────────────────
@@ -298,20 +350,34 @@ def update_quest_priority(quest_id: int, priority: str) -> Optional[Dict]:
         return dict(row) if row else None
 
 
+def get_cosmetics() -> List[Dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM cosmetics")
+        return [dict(r) for r in cur.fetchall()]
+
+
 def roll_loot() -> Optional[Dict]:
     if random.random() > LOOT_DROP_CHANCE:
         return None
     rarity = random.choices(list(RARITY_WEIGHTS.keys()), weights=list(RARITY_WEIGHTS.values()))[0]
-    candidates = [item for item in LOOT_POOL if item["rarity"] == rarity]
-    return random.choice(candidates)
+    candidates = [
+        {"key": it["key"], "name": it["name"], "rarity": it["rarity"], "kind": "material"}
+        for it in LOOT_POOL if it["rarity"] == rarity
+    ] + [
+        {"key": c["key"], "name": c["text"], "rarity": c["rarity"], "kind": "cosmetic"}
+        for c in get_cosmetics() if c["rarity"] == rarity
+    ]
+    return random.choice(candidates) if candidates else None
 
 
 def add_loot_drop(chat_id: int, item: Dict):
     with get_db() as conn:
         conn.cursor().execute(
-            "INSERT INTO inventory (chat_id, item_key, item_name, rarity, obtained_at) "
-            "VALUES (%s, %s, %s, %s, %s)",
-            (chat_id, item["key"], item["name"], item["rarity"], datetime.now().isoformat())
+            "INSERT INTO inventory (chat_id, item_key, item_name, rarity, obtained_at, kind) "
+            "VALUES (%s, %s, %s, %s, %s, %s)",
+            (chat_id, item["key"], item["name"], item["rarity"],
+             datetime.now().isoformat(), item.get("kind", "material"))
         )
 
 
@@ -329,17 +395,10 @@ def complete_quest(chat_id: int, quest_id: int) -> Optional[Dict]:
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     last      = player.get("last_active_date", "")
     streak    = player.get("streak_days", 0)
-    freezes   = player.get("streak_freezes", 0) or 0
-    freeze_used = False
     if last == yesterday:
         streak += 1
     elif last != today:
-        if freezes > 0 and streak > 0:
-            streak += 1
-            freezes -= 1
-            freeze_used = True
-        else:
-            streak = 1
+        streak = 1
 
     new_xp      = player["total_xp"] + quest["xp_value"]
     new_level   = compute_level(new_xp)
@@ -351,7 +410,6 @@ def complete_quest(chat_id: int, quest_id: int) -> Optional[Dict]:
         total_xp=new_xp,
         level=new_level,
         streak_days=streak,
-        streak_freezes=freezes,
         last_active_date=today,
         quests_completed_total=player["quests_completed_total"] + 1,
         helium3=new_helium3,
@@ -363,7 +421,6 @@ def complete_quest(chat_id: int, quest_id: int) -> Optional[Dict]:
 
     quest["helium3_awarded"] = helium3
     quest["loot"]            = loot
-    quest["freeze_used"]     = freeze_used
     return quest
 
 
@@ -511,7 +568,8 @@ def ensure_daily_rollover(chat_id: int) -> List[Dict]:
         cur = conn.cursor()
         cur.execute(
             "UPDATE quests SET status = 'backlog', backlogged_at = %s "
-            "WHERE chat_id = %s AND status IN ('todo', 'in_progress')",
+            "WHERE chat_id = %s AND status IN ('todo', 'in_progress') "
+            "AND source != 'daily_miku'",
             (now, chat_id)
         )
         cur.execute(
@@ -545,6 +603,69 @@ def pull_from_backlog(chat_id: int, quest_id: int) -> Optional[Dict]:
         cur.execute("SELECT * FROM quests WHERE id = %s", (quest_id,))
         row = cur.fetchone()
         return dict(row) if row else None
+
+
+# ─── Miku's Quest of the Day ──────────────────────────────────────────────────
+
+def get_or_create_daily_quest() -> Dict:
+    """The single quest-of-the-day, shared globally across every account."""
+    today = date.today().isoformat()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM daily_quests WHERE date = %s", (today,))
+        row = cur.fetchone()
+        if row:
+            return dict(row)
+        pick = random.choice(DAILY_QUEST_POOL)
+        cur.execute(
+            "INSERT INTO daily_quests (date, text, category) VALUES (%s, %s, %s) "
+            "ON CONFLICT (date) DO NOTHING",
+            (today, pick["text"], pick["category"])
+        )
+        cur.execute("SELECT * FROM daily_quests WHERE date = %s", (today,))
+        return dict(cur.fetchone())
+
+
+def ensure_daily_quest_for_chat(chat_id: int) -> Optional[Dict]:
+    """Materialize today's global Miku quest as a per-chat quest row.
+
+    Any of the chat's previous Miku quests still open are expired (dropped, not
+    backlogged) — this is the "doesn't carry over" mechanic, distinct from the
+    regular backlog rollover.
+    """
+    global_quest = get_or_create_daily_quest()
+    today = date.today().isoformat()
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT * FROM quests WHERE chat_id = %s AND daily_quest_date = %s "
+            "AND status NOT IN ('dropped', 'archived')",
+            (chat_id, today)
+        )
+        row = cur.fetchone()
+        if row:
+            quest = dict(row)
+            quest["category"] = global_quest["category"]
+            return quest
+
+        cur.execute(
+            "UPDATE quests SET status = 'dropped' WHERE chat_id = %s AND source = 'daily_miku' "
+            "AND (daily_quest_date IS NULL OR daily_quest_date != %s) "
+            "AND status IN ('todo', 'in_progress')",
+            (chat_id, today)
+        )
+        now = datetime.now().isoformat()
+        cur.execute(
+            "INSERT INTO quests (chat_id, text, source, status, priority, tag, xp_value, "
+            "created_at, daily_quest_date) "
+            "VALUES (%s, %s, 'daily_miku', 'todo', 'high', '#daily', %s, %s, %s) RETURNING id",
+            (chat_id, global_quest["text"], DAILY_QUEST_XP, now, today)
+        )
+        qid = cur.fetchone()["id"]
+        cur.execute("SELECT * FROM quests WHERE id = %s", (qid,))
+        quest = dict(cur.fetchone())
+        quest["category"] = global_quest["category"]
+        return quest
 
 
 # ─── Due date / reminders ────────────────────────────────────────────────────
@@ -815,16 +936,29 @@ def get_today_pomodoro_stats(chat_id: int) -> Dict:
 
 # ─── Inventory & Shop ─────────────────────────────────────────────────────────
 
-def get_inventory(chat_id: int) -> List[Dict]:
+def get_inventory(chat_id: int, kind: Optional[str] = None) -> List[Dict]:
+    query  = ("SELECT item_key, item_name, rarity, kind, COUNT(*) AS qty FROM inventory "
+              "WHERE chat_id = %s")
+    params: list = [chat_id]
+    if kind:
+        query += " AND kind = %s"
+        params.append(kind)
+    query += (" GROUP BY item_key, item_name, rarity, kind "
+              "ORDER BY CASE rarity WHEN 'epic' THEN 0 WHEN 'rare' THEN 1 ELSE 2 END, item_name")
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(query, params)
+        return [dict(r) for r in cur.fetchall()]
+
+
+def owns_item(chat_id: int, item_key: str, kind: str) -> bool:
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT item_key, item_name, rarity, COUNT(*) AS qty FROM inventory "
-            "WHERE chat_id = %s GROUP BY item_key, item_name, rarity "
-            "ORDER BY CASE rarity WHEN 'epic' THEN 0 WHEN 'rare' THEN 1 ELSE 2 END, item_name",
-            (chat_id,)
+            "SELECT 1 FROM inventory WHERE chat_id = %s AND item_key = %s AND kind = %s LIMIT 1",
+            (chat_id, item_key, kind)
         )
-        return [dict(r) for r in cur.fetchall()]
+        return cur.fetchone() is not None
 
 
 def spend_helium3(chat_id: int, amount: int) -> bool:
@@ -836,17 +970,6 @@ def spend_helium3(chat_id: int, amount: int) -> bool:
             (amount, chat_id, amount)
         )
         return cur.rowcount > 0
-
-
-def buy_streak_freeze(chat_id: int) -> bool:
-    if not spend_helium3(chat_id, SHOP_ITEMS["streak_freeze"]["cost"]):
-        return False
-    with get_db() as conn:
-        conn.cursor().execute(
-            "UPDATE player SET streak_freezes = COALESCE(streak_freezes, 0) + 1 WHERE chat_id = %s",
-            (chat_id,)
-        )
-    return True
 
 
 def buy_custom_title(chat_id: int) -> bool:
@@ -868,3 +991,21 @@ def set_custom_title(chat_id: int, text: str) -> bool:
             (text[:40], chat_id)
         )
         return cur.rowcount > 0
+
+
+def equip_cosmetic(chat_id: int, item_key: str) -> Optional[str]:
+    """Equip an owned cosmetic as the display title. Returns the title text, or None if not owned."""
+    if not owns_item(chat_id, item_key, "cosmetic"):
+        return None
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT item_name FROM inventory WHERE chat_id = %s AND item_key = %s AND kind = 'cosmetic' LIMIT 1",
+            (chat_id, item_key)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        text = row["item_name"]
+        cur.execute("UPDATE player SET custom_title = %s WHERE chat_id = %s", (text, chat_id))
+        return text

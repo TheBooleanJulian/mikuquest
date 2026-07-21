@@ -17,7 +17,7 @@ from handlers import (
     gcalauth_command, gcalcode_command, gcalsync_command,
     web_command, share_command,
     backlog_command, pomo_command,
-    inventory_command, shop_command, settitle_command,
+    inventory_command, shop_command, settitle_command, equip_command,
     message_handler, callback_handler,
 )
 from scheduler import setup_scheduler
@@ -80,6 +80,7 @@ def main():
     app.add_handler(CommandHandler("inventory",  inventory_command))
     app.add_handler(CommandHandler("shop",       shop_command))
     app.add_handler(CommandHandler("settitle",   settitle_command))
+    app.add_handler(CommandHandler("equip",      equip_command))
 
     # Callbacks & messages
     app.add_handler(CallbackQueryHandler(callback_handler))

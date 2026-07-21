@@ -15,15 +15,31 @@
 </div>
 
 <div class="card">
-  <h2>Salvage ({{ items|length }})</h2>
+  <h2>🎒 Salvage ({{ materials|length }})</h2>
   <ul class="quest-list">
-    {% for it in items %}
+    {% for it in materials %}
     <li class="quest">
       <span class="text">{{ RARITY_ICONS[it.rarity] }} {{ it.item_name }} <span class="muted">({{ it.rarity }})</span></span>
       <span class="xp">×{{ it.qty }}</span>
     </li>
     {% endfor %}
-    {% if not items %}<li class="empty">No salvage collected yet~ Clear some quests for a chance at a drop!</li>{% endif %}
+    {% if not materials %}<li class="empty">No salvage collected yet~ Clear some quests for a chance at a drop!</li>{% endif %}
+  </ul>
+</div>
+
+<div class="card">
+  <h2>✨ Cosmetics ({{ cosmetics|length }})</h2>
+  <ul class="quest-list">
+    {% for it in cosmetics %}
+    <li class="quest">
+      <span class="text">{{ RARITY_ICONS[it.rarity] }} {{ it.item_name }} <span class="muted">({{ it.rarity }})</span></span>
+      <form method="post" action="/app/cosmetics/equip">
+        <input type="hidden" name="item_id" value="{{ it.item_key }}">
+        <button type="submit" class="primary">Equip</button>
+      </form>
+    </li>
+    {% endfor %}
+    {% if not cosmetics %}<li class="empty">No cosmetics found yet~ Clear some quests for a chance at a drop!</li>{% endif %}
   </ul>
 </div>
 {% endblock %}

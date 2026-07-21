@@ -132,6 +132,7 @@ def fmt_due(due_iso: str) -> str:
 def render_board(chat_id: int, tag_filter: str = None):
     db.clear_old_pins(chat_id)
     db.ensure_daily_rollover(chat_id)
+    daily_quest = db.ensure_daily_quest_for_chat(chat_id)
     player  = db.get_or_create_player(chat_id)
     level   = player["level"]
     title   = db.get_display_title(player)
@@ -142,7 +143,8 @@ def render_board(chat_id: int, tag_filter: str = None):
 
     today_goal_ids = db.get_daily_goals(chat_id)
 
-    todo        = db.get_quests(chat_id, status="todo",        tag=tag_filter)
+    todo        = [q for q in db.get_quests(chat_id, status="todo", tag=tag_filter)
+                   if q["source"] != "daily_miku"]
     in_progress = db.get_quests(chat_id, status="in_progress", tag=tag_filter)
     done_today  = db.get_completed_today(chat_id)
     backlog_n   = len(db.get_quests(chat_id, status="backlog"))
@@ -163,6 +165,15 @@ def render_board(chat_id: int, tag_filter: str = None):
         lines.append(f"\n🍅 <i>Focus session running — {mins_left}m left</i>")
 
     keyboard = []
+
+    if daily_quest and daily_quest["status"] in ("todo", "in_progress"):
+        lines.append(f"\n🌟 <b>MIKU'S QUEST OF THE DAY</b>  <i>({daily_quest['category']})</i>")
+        lines.append("──────────────────────────────")
+        lines.append(f"{daily_quest['text']}  💎 +{daily_quest['xp_value']}xp")
+        keyboard.append([InlineKeyboardButton(
+            f"✅ {trunc(daily_quest['text'], 30)}",
+            callback_data=f"done:{daily_quest['id']}"
+        )])
 
     # TODO
     lines.append(f"\n📥 <b>TODO</b> ({len(todo)})")
@@ -372,9 +383,11 @@ async def _complete(chat_id: int, quest_id: int, query=None, update=None):
     loot = quest.get("loot")
     if loot:
         icon = db.RARITY_ICONS.get(loot["rarity"], "📦")
-        msg += f"\n📦 <b>Cargo find!</b> {icon} {loot['name']} <i>({loot['rarity']})</i>"
-    if quest.get("freeze_used"):
-        msg += "\n🧊 <i>Streak Freeze used — your streak survives!</i>"
+        if loot.get("kind") == "cosmetic":
+            msg += (f"\n🎫 <b>Cosmetic found!</b> {icon} {loot['name']} <i>({loot['rarity']})</i>"
+                     f"\n<i>/equip {loot['key']} to wear it~</i>")
+        else:
+            msg += f"\n📦 <b>Cargo find!</b> {icon} {loot['name']} <i>({loot['rarity']})</i>"
     if quest.get("recurring"):
         msg += f"\n🔁 Next <b>{quest['recurring']}</b> quest auto-added to setlist~"
     if level_up:
@@ -426,16 +439,20 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<code>/backlog</code>               — View unfinished quests swept from previous days\n"
         "<i>Each morning, today's board starts fresh — unfinished quests move to\n"
         "the backlog, and the top 5 get auto-pulled back in~</i>\n\n"
+        "<b>🌟 Miku's Quest of the Day</b>\n"
+        "<i>A fresh self-improvement/productive/kindness quest, the same for everyone,\n"
+        "shown at the top of /board — doesn't carry over if you skip it~</i>\n\n"
         "<b>Pomodoro</b>\n"
         "<code>/pomo</code>                  — Start a 25-min freeform focus session\n"
         "<code>/pomo &lt;id&gt;</code>             — Focus session tied to a quest\n"
         "<code>/pomo &lt;id&gt; 45</code>          — Custom duration (10–90 min)\n"
         "<i>+15 XP bonus per completed session~</i>\n\n"
         "<b>Helium-3 &amp; Salvage</b>\n"
-        "<code>/inventory</code>             — View collected salvage &amp; Helium-3\n"
-        "<code>/shop</code>                  — Spend Helium-3 (streak freeze, custom title)\n"
+        "<code>/inventory</code>             — View collected salvage, cosmetics &amp; Helium-3\n"
+        "<code>/shop</code>                  — Spend Helium-3 (custom title unlock)\n"
         "<code>/settitle &lt;text&gt;</code>       — Set your custom title (after unlocking)\n"
-        "<i>Clearing quests has a chance to drop salvage~ 🛰️</i>\n\n"
+        "<code>/equip &lt;key&gt;</code>           — Wear an owned cosmetic as your title, free\n"
+        "<i>Clearing quests has a chance to drop salvage or cosmetics~ 🛰️</i>\n\n"
         "<b>Notes</b>\n"
         "<code>/note &lt;id&gt; &lt;text&gt;</code>   — Add context to a quest\n"
         "Reply to a quest card             — Also adds a note~\n\n"
@@ -608,7 +625,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
         f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>\n"
         f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP\n"
-        f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>  •  🧊 Freezes: <b>{player.get('streak_freezes', 0) or 0}</b>",
+        f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>",
         parse_mode=ParseMode.HTML
     )
 
@@ -825,24 +842,49 @@ async def pomo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ─── Inventory & Shop ─────────────────────────────────────────────────────────
 
 async def inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    player  = db.get_or_create_player(chat_id)
-    items   = db.get_inventory(chat_id)
+    chat_id   = update.effective_chat.id
+    player    = db.get_or_create_player(chat_id)
+    materials = db.get_inventory(chat_id, kind="material")
+    cosmetics = db.get_inventory(chat_id, kind="cosmetic")
 
     lines = [
         "🛰️ <b>Cargo Hold</b>",
         f"Helium-3: <b>{player.get('helium3', 0) or 0}</b>",
         "",
+        "🎒 <b>Salvage</b>",
     ]
-    if items:
-        for it in items:
+    if materials:
+        for it in materials:
             icon = db.RARITY_ICONS.get(it["rarity"], "📦")
             lines.append(f"{icon} {it['item_name']}  <i>×{it['qty']}</i>")
     else:
         lines.append("— No salvage collected yet~ Clear some quests for a chance at a drop! —")
+
+    lines.append("\n✨ <b>Cosmetics</b>")
+    if cosmetics:
+        for it in cosmetics:
+            icon = db.RARITY_ICONS.get(it["rarity"], "📦")
+            lines.append(f"{icon} {it['item_name']}  <code>{it['item_key']}</code>")
+        lines.append("\n<i>/equip &lt;key&gt; to wear one as your title~</i>")
+    else:
+        lines.append("— No cosmetics found yet~ —")
+
     lines.append("\n<i>/shop to spend your Helium-3~</i>")
 
     await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def equip_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    if not context.args:
+        await update.message.reply_text("Usage: /equip <key>  (see /inventory for your keys)")
+        return
+    key   = context.args[0]
+    title = db.equip_cosmetic(chat_id, key)
+    if title:
+        await update.message.reply_text(f"✨ Equipped: <b>{title}</b>", parse_mode=ParseMode.HTML)
+    else:
+        await update.message.reply_text("You don't own that cosmetic~ Check /inventory for your keys.")
 
 
 async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1160,7 +1202,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
             f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>\n"
             f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP\n"
-            f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>  •  🧊 Freezes: <b>{player.get('streak_freezes', 0) or 0}</b>"
+            f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>"
         )
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("← Back to Stage", callback_data="board:refresh")]])
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -1208,9 +1250,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         item    = db.SHOP_ITEMS.get(item_id)
         if not item:
             return
-        if item_id == "streak_freeze":
-            ok = db.buy_streak_freeze(chat_id)
-        elif item_id == "custom_title":
+        if item_id == "custom_title":
             ok = db.buy_custom_title(chat_id)
         else:
             ok = False

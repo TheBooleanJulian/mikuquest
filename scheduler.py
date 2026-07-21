@@ -43,11 +43,13 @@ async def send_daily_summary(app: Application):
         try:
             db.clear_old_pins(chat_id)
             pulled      = db.ensure_daily_rollover(chat_id)
+            daily_quest = db.ensure_daily_quest_for_chat(chat_id)
             player      = db.get_or_create_player(chat_id)
             done_yday   = db.get_completed_on(chat_id, yesterday)
             yday_xp     = sum(q["xp_value"] for q in done_yday)
             in_progress = db.get_quests(chat_id, status="in_progress")
-            todo        = db.get_quests(chat_id, status="todo")
+            todo        = [q for q in db.get_quests(chat_id, status="todo")
+                           if q["source"] != "daily_miku"]
             active      = in_progress + todo
 
             lines = [
@@ -73,6 +75,11 @@ async def send_daily_summary(app: Application):
             ]
             if pulled:
                 lines.append(f"📥 <b>{len(pulled)} pulled from backlog</b> to kick off today~")
+            if daily_quest and daily_quest["status"] in ("todo", "in_progress"):
+                lines.append(
+                    f"🌟 <b>Miku's Quest of the Day</b> <i>({daily_quest['category']})</i>\n"
+                    f"{daily_quest['text']}  💎 +{daily_quest['xp_value']}xp"
+                )
             lines.append(f"<b>TODAY'S SETLIST ({len(active)})</b>")
 
             if active:
