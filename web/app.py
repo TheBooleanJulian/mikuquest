@@ -25,6 +25,8 @@ templates.env.globals.update(
     PRIORITY_ICONS=PRIORITY_ICONS,
     PRIORITY_LABELS=PRIORITY_LABELS,
     STATUS_ICONS=STATUS_ICONS,
+    RARITY_ICONS=db.RARITY_ICONS,
+    SHOP_ITEMS=db.SHOP_ITEMS,
     xp_bar=xp_bar,
     fmt_due=fmt_due,
     trunc=trunc,
@@ -76,7 +78,7 @@ def board_snapshot(chat_id: int, tag_filter: str = None, mutate: bool = True) ->
         db.clear_old_pins(chat_id)
         db.ensure_daily_rollover(chat_id)
     player  = db.get_or_create_player(chat_id)
-    title   = db.get_title(player["level"])
+    title   = db.get_display_title(player)
     goal_ids = db.get_daily_goals(chat_id)
 
     todo        = db.get_quests(chat_id, status="todo", tag=tag_filter)
@@ -98,12 +100,18 @@ def board_snapshot(chat_id: int, tag_filter: str = None, mutate: bool = True) ->
         "tag_filter": tag_filter,
         "backlog_n": backlog_n,
         "active_pomo": active_pomo,
+        "helium3": player.get("helium3", 0) or 0,
     }
 
 
 def backlog_snapshot(chat_id: int) -> dict:
     db.ensure_daily_rollover(chat_id)
     return {"backlog": db.get_quests(chat_id, status="backlog")}
+
+
+def inventory_snapshot(chat_id: int) -> dict:
+    player = db.get_or_create_player(chat_id)
+    return {"items": db.get_inventory(chat_id), "helium3": player.get("helium3", 0) or 0}
 
 
 def week_snapshot(chat_id: int) -> dict:
@@ -119,7 +127,7 @@ def week_snapshot(chat_id: int) -> dict:
 
     return {
         "player": player,
-        "title": db.get_title(player["level"]),
+        "title": db.get_display_title(player),
         "quests": quests,
         "week_xp": week_xp,
         "week_str": f"{monday.strftime('%-d %b')} – {today.strftime('%-d %b')}",
@@ -254,6 +262,38 @@ def cancel_pomo(request: Request, session_id: int):
     return RedirectResponse("/app", status_code=303)
 
 
+@app.get("/app/inventory", response_class=HTMLResponse)
+def inventory_page(request: Request):
+    chat_id = require_chat_id(request)
+    ctx = inventory_snapshot(chat_id)
+    ctx["request"] = request
+    return templates.TemplateResponse("inventory.html", ctx)
+
+
+@app.get("/app/shop", response_class=HTMLResponse)
+def shop_page(request: Request, msg: str = None):
+    chat_id = require_chat_id(request)
+    player  = db.get_or_create_player(chat_id)
+    return templates.TemplateResponse("shop.html", {
+        "request": request, "helium3": player.get("helium3", 0) or 0, "msg": msg,
+    })
+
+
+@app.post("/app/shop/buy", dependencies=[Depends(require_same_origin)])
+def shop_buy(request: Request, item_id: str = Form(...)):
+    chat_id = require_chat_id(request)
+    if item_id not in db.SHOP_ITEMS:
+        raise HTTPException(status_code=400, detail="Unknown item")
+    if item_id == "streak_freeze":
+        ok = db.buy_streak_freeze(chat_id)
+    elif item_id == "custom_title":
+        ok = db.buy_custom_title(chat_id)
+    else:
+        ok = False
+    msg = "bought" if ok else "insufficient"
+    return RedirectResponse(f"/app/shop?msg={msg}", status_code=303)
+
+
 @app.post("/app/share", dependencies=[Depends(require_same_origin)])
 def make_share(request: Request, kind: str = Form(...), quest_id: str = Form(None),
                return_to: str = Form("/app")):
@@ -298,7 +338,7 @@ def public_share(request: Request, token: str):
         ctx = {
             "request": request,
             "player": player,
-            "title": db.get_title(player["level"]),
+            "title": db.get_display_title(player),
             "to_next": 200 - (player["total_xp"] % 200),
             "done_today": db.get_completed_today(chat_id),
         }

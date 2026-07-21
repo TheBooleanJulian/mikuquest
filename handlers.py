@@ -134,10 +134,11 @@ def render_board(chat_id: int, tag_filter: str = None):
     db.ensure_daily_rollover(chat_id)
     player  = db.get_or_create_player(chat_id)
     level   = player["level"]
-    title   = db.get_title(level)
+    title   = db.get_display_title(player)
     xp      = player["total_xp"]
     streak  = player["streak_days"]
     to_next = 200 - (xp % 200)
+    helium3 = player.get("helium3", 0) or 0
 
     today_goal_ids = db.get_daily_goals(chat_id)
 
@@ -152,7 +153,7 @@ def render_board(chat_id: int, tag_filter: str = None):
     lines = [
         f"╔══════════════════════════╗",
         f"║  🎤 MIGUQUEST  •  Lv.{level} {title}",
-        f"║  🔥 {streak}-day streak  •  {xp} XP",
+        f"║  🔥 {streak}-day streak  •  {xp} XP  •  🛰️ {helium3} He-3",
         f"║  [{xp_bar(xp)}] {to_next} XP to next stage",
         f"╚══════════════════════════╝{tag_note}",
     ]
@@ -365,8 +366,15 @@ async def _complete(chat_id: int, quest_id: int, query=None, update=None):
         f"🎶 <b>QUEST CLEARED — ENCORE!</b>\n"
         f"{quest['text']}\n\n"
         f"⚡ +{quest['xp_value']} XP  •  {player['total_xp']} total  •  Lv.{player['level']}\n"
-        f"🔥 {player['streak_days']}-day streak  •  {done_cnt} quests cleared today"
+        f"🔥 {player['streak_days']}-day streak  •  {done_cnt} quests cleared today\n"
+        f"🛰️ Salvage recovered: +{quest.get('helium3_awarded', 0)} He-3"
     )
+    loot = quest.get("loot")
+    if loot:
+        icon = db.RARITY_ICONS.get(loot["rarity"], "📦")
+        msg += f"\n📦 <b>Cargo find!</b> {icon} {loot['name']} <i>({loot['rarity']})</i>"
+    if quest.get("freeze_used"):
+        msg += "\n🧊 <i>Streak Freeze used — your streak survives!</i>"
     if quest.get("recurring"):
         msg += f"\n🔁 Next <b>{quest['recurring']}</b> quest auto-added to setlist~"
     if level_up:
@@ -423,6 +431,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<code>/pomo &lt;id&gt;</code>             — Focus session tied to a quest\n"
         "<code>/pomo &lt;id&gt; 45</code>          — Custom duration (10–90 min)\n"
         "<i>+15 XP bonus per completed session~</i>\n\n"
+        "<b>Helium-3 &amp; Salvage</b>\n"
+        "<code>/inventory</code>             — View collected salvage &amp; Helium-3\n"
+        "<code>/shop</code>                  — Spend Helium-3 (streak freeze, custom title)\n"
+        "<code>/settitle &lt;text&gt;</code>       — Set your custom title (after unlocking)\n"
+        "<i>Clearing quests has a chance to drop salvage~ 🛰️</i>\n\n"
         "<b>Notes</b>\n"
         "<code>/note &lt;id&gt; &lt;text&gt;</code>   — Add context to a quest\n"
         "Reply to a quest card             — Also adds a note~\n\n"
@@ -582,7 +595,7 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     player     = db.get_or_create_player(chat_id)
     done_today = db.get_completed_today(chat_id)
     today_xp   = sum(q["xp_value"] for q in done_today)
-    title      = db.get_title(player["level"])
+    title      = db.get_display_title(player)
     to_next    = 200 - (player["total_xp"] % 200)
     pomo       = db.get_today_pomodoro_stats(chat_id)
     await update.message.reply_text(
@@ -594,7 +607,8 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔥 Streak: <b>{player['streak_days']} days</b>\n"
         f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
         f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>\n"
-        f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP",
+        f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP\n"
+        f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>  •  🧊 Freezes: <b>{player.get('streak_freezes', 0) or 0}</b>",
         parse_mode=ParseMode.HTML
     )
 
@@ -697,7 +711,7 @@ async def _send_week_summary(chat_id: int, send_fn):
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
         f"✔️  <b>{len(quests)} quests cleared</b>  •  +{week_xp} XP",
         f"🔥 Streak: <b>{player['streak_days']} days</b>",
-        f"🎤 Level: <b>{player['level']} — {db.get_title(player['level'])}</b>",
+        f"🎤 Level: <b>{player['level']} — {db.get_display_title(player)}</b>",
         "",
         "<b>BY TAG</b>",
     ]
@@ -806,6 +820,67 @@ async def pomo_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
     await _start_pomodoro(chat_id, quest_id, duration, send_fn=update.message.reply_text)
+
+
+# ─── Inventory & Shop ─────────────────────────────────────────────────────────
+
+async def inventory_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    player  = db.get_or_create_player(chat_id)
+    items   = db.get_inventory(chat_id)
+
+    lines = [
+        "🛰️ <b>Cargo Hold</b>",
+        f"Helium-3: <b>{player.get('helium3', 0) or 0}</b>",
+        "",
+    ]
+    if items:
+        for it in items:
+            icon = db.RARITY_ICONS.get(it["rarity"], "📦")
+            lines.append(f"{icon} {it['item_name']}  <i>×{it['qty']}</i>")
+    else:
+        lines.append("— No salvage collected yet~ Clear some quests for a chance at a drop! —")
+    lines.append("\n<i>/shop to spend your Helium-3~</i>")
+
+    await update.message.reply_text("\n".join(lines), parse_mode=ParseMode.HTML)
+
+
+async def shop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    player  = db.get_or_create_player(chat_id)
+
+    lines = [
+        "🏪 <b>Lunar Outpost Shop</b>",
+        f"Helium-3: <b>{player.get('helium3', 0) or 0}</b>",
+        "",
+    ]
+    kb = []
+    for item_id, item in db.SHOP_ITEMS.items():
+        lines.append(f"{item['name']}  —  {item['cost']} He-3\n<i>{item['desc']}</i>")
+        kb.append([InlineKeyboardButton(
+            f"Buy {item['name']} ({item['cost']} He-3)",
+            callback_data=f"shop:buy:{item_id}"
+        )])
+    await update.message.reply_text(
+        "\n\n".join(lines), parse_mode=ParseMode.HTML,
+        reply_markup=InlineKeyboardMarkup(kb)
+    )
+
+
+async def settitle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    player  = db.get_or_create_player(chat_id)
+    if not player.get("custom_title_unlocked"):
+        await update.message.reply_text(
+            "🔒 Custom titles aren't unlocked yet~ Buy one in /shop first!"
+        )
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: /settitle <text>")
+        return
+    text = " ".join(context.args)
+    db.set_custom_title(chat_id, text)
+    await update.message.reply_text(f"🎫 Title set to: <b>{text[:40]}</b>", parse_mode=ParseMode.HTML)
 
 
 # ─── Web (magic login + share links) ─────────────────────────────────────────
@@ -1072,7 +1147,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         player     = db.get_or_create_player(chat_id)
         done_today = db.get_completed_today(chat_id)
         today_xp   = sum(q["xp_value"] for q in done_today)
-        title      = db.get_title(player["level"])
+        title      = db.get_display_title(player)
         to_next    = 200 - (player["total_xp"] % 200)
         pomo       = db.get_today_pomodoro_stats(chat_id)
         text = (
@@ -1084,7 +1159,8 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🔥 Streak: <b>{player['streak_days']} days</b>\n"
             f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
             f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>\n"
-            f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP"
+            f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP\n"
+            f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>  •  🧊 Freezes: <b>{player.get('streak_freezes', 0) or 0}</b>"
         )
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("← Back to Stage", callback_data="board:refresh")]])
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)
@@ -1125,6 +1201,27 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session    = db.cancel_pomodoro(chat_id, session_id)
         if session and session["status"] == "cancelled":
             await query.edit_message_text("⏹ Focus session cancelled~ No worries, try again anytime.")
+
+    # ── Shop ─────────────────────────────────────────────────────────────────────
+    elif data.startswith("shop:buy:"):
+        item_id = data.split(":")[2]
+        item    = db.SHOP_ITEMS.get(item_id)
+        if not item:
+            return
+        if item_id == "streak_freeze":
+            ok = db.buy_streak_freeze(chat_id)
+        elif item_id == "custom_title":
+            ok = db.buy_custom_title(chat_id)
+        else:
+            ok = False
+        if ok:
+            await query.message.reply_text(
+                f"✅ Purchased <b>{item['name']}</b>!", parse_mode=ParseMode.HTML
+            )
+        else:
+            await query.message.reply_text(
+                f"⚠️ Not enough Helium-3~ Need {item['cost']}."
+            )
 
 
 async def _refresh_goals_picker(query, chat_id: int):

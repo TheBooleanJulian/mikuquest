@@ -172,7 +172,8 @@ async def pomo_sweep_job(app: Application):
             await app.bot.send_message(
                 chat_id=session["chat_id"],
                 text=(
-                    f"🍅 <b>Pomodoro complete!</b>  +{completed['xp_awarded']} XP\n"
+                    f"🍅 <b>Pomodoro complete!</b>  +{completed['xp_awarded']} XP  •  "
+                    f"+{completed.get('helium3_awarded', 0)} He-3\n"
                     f"{session['duration_minutes']} minutes of focus, nailed it~ 🎵"
                     f"{quest_note}"
                 ),

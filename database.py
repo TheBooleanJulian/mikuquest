@@ -1,4 +1,5 @@
 import os
+import random
 import secrets
 from datetime import datetime, date, timedelta
 from typing import Optional, List, Dict
@@ -16,6 +17,33 @@ POMO_DEFAULT_MINUTES = 25
 POMO_MIN_MINUTES    = 10
 POMO_MAX_MINUTES    = 90
 POMO_XP_BONUS       = 15
+POMO_HELIUM_BONUS   = 3
+
+HELIUM_MAP       = {"critical": 8, "high": 6, "medium": 4, "low": 2}
+LOOT_DROP_CHANCE = 0.3
+RARITY_WEIGHTS   = {"common": 70, "rare": 25, "epic": 5}
+LOOT_POOL = [
+    {"key": "regolith_chunk",  "name": "Loose Regolith Chunk", "rarity": "common"},
+    {"key": "o2_filter",       "name": "Cracked O2 Filter",     "rarity": "common"},
+    {"key": "spare_bolt",      "name": "Spare Bolt",            "rarity": "common"},
+    {"key": "frayed_cable",    "name": "Frayed Cable",          "rarity": "common"},
+    {"key": "ration_pack",     "name": "Empty Ration Pack",     "rarity": "common"},
+    {"key": "drill_bit",       "name": "Salvaged Drill Bit",    "rarity": "rare"},
+    {"key": "titanium_panel",  "name": "Titanium Panel",        "rarity": "rare"},
+    {"key": "battery_cell",    "name": "Backup Battery Cell",   "rarity": "rare"},
+    {"key": "data_chip",       "name": "Encrypted Data Chip",   "rarity": "rare"},
+    {"key": "he3_core_sample", "name": "Helium-3 Core Sample",  "rarity": "epic"},
+    {"key": "rover_module",    "name": "Derelict Rover Module", "rarity": "epic"},
+    {"key": "lunar_relic",     "name": "Ancient Lunar Relic",   "rarity": "epic"},
+]
+RARITY_ICONS = {"common": "🪨", "rare": "⚙️", "epic": "💎"}
+
+SHOP_ITEMS = {
+    "streak_freeze": {"name": "🧊 Streak Freeze Token", "cost": 50,
+                       "desc": "Protects your streak once if you miss a day."},
+    "custom_title":  {"name": "🎫 Custom Title Unlock", "cost": 100,
+                       "desc": "Unlocks /settitle to set your own vanity title."},
+}
 
 _pool: Optional[psycopg2.pool.SimpleConnectionPool] = None
 
@@ -119,10 +147,23 @@ def init_db():
                 xp_awarded        INTEGER DEFAULT 0,
                 completed_at      TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS inventory (
+                id          SERIAL PRIMARY KEY,
+                chat_id     BIGINT NOT NULL,
+                item_key    TEXT   NOT NULL,
+                item_name   TEXT   NOT NULL,
+                rarity      TEXT   NOT NULL,
+                obtained_at TEXT   NOT NULL
+            );
         """)
         # Additive migrations for columns added after the initial Postgres rollout.
         cur.execute("ALTER TABLE quests ADD COLUMN IF NOT EXISTS backlogged_at TEXT")
         cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS last_rollover_date TEXT")
+        cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS helium3 INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS streak_freezes INTEGER DEFAULT 0")
+        cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS custom_title TEXT")
+        cur.execute("ALTER TABLE player ADD COLUMN IF NOT EXISTS custom_title_unlocked INTEGER DEFAULT 0")
 
 
 # ─── Player ────────────────────────────────────────────────────────────────────
@@ -139,6 +180,10 @@ def get_title(level: int) -> str:
     if level < 25: return "Headliner"
     if level < 30: return "World Tour"
     return "✨ Diva Mode ✨"
+
+
+def get_display_title(player: Dict) -> str:
+    return player.get("custom_title") or get_title(player["level"])
 
 
 def get_or_create_player(chat_id: int) -> Dict:
@@ -253,6 +298,23 @@ def update_quest_priority(quest_id: int, priority: str) -> Optional[Dict]:
         return dict(row) if row else None
 
 
+def roll_loot() -> Optional[Dict]:
+    if random.random() > LOOT_DROP_CHANCE:
+        return None
+    rarity = random.choices(list(RARITY_WEIGHTS.keys()), weights=list(RARITY_WEIGHTS.values()))[0]
+    candidates = [item for item in LOOT_POOL if item["rarity"] == rarity]
+    return random.choice(candidates)
+
+
+def add_loot_drop(chat_id: int, item: Dict):
+    with get_db() as conn:
+        conn.cursor().execute(
+            "INSERT INTO inventory (chat_id, item_key, item_name, rarity, obtained_at) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (chat_id, item["key"], item["name"], item["rarity"], datetime.now().isoformat())
+        )
+
+
 def complete_quest(chat_id: int, quest_id: int) -> Optional[Dict]:
     quest = update_quest_status(quest_id, "done")
     if not quest:
@@ -267,22 +329,41 @@ def complete_quest(chat_id: int, quest_id: int) -> Optional[Dict]:
     yesterday = (date.today() - timedelta(days=1)).isoformat()
     last      = player.get("last_active_date", "")
     streak    = player.get("streak_days", 0)
+    freezes   = player.get("streak_freezes", 0) or 0
+    freeze_used = False
     if last == yesterday:
         streak += 1
     elif last != today:
-        streak = 1
+        if freezes > 0 and streak > 0:
+            streak += 1
+            freezes -= 1
+            freeze_used = True
+        else:
+            streak = 1
 
-    new_xp    = player["total_xp"] + quest["xp_value"]
-    new_level = compute_level(new_xp)
+    new_xp      = player["total_xp"] + quest["xp_value"]
+    new_level   = compute_level(new_xp)
+    helium3     = HELIUM_MAP.get(quest["priority"], 4)
+    new_helium3 = (player.get("helium3", 0) or 0) + helium3
 
     update_player(
         chat_id,
         total_xp=new_xp,
         level=new_level,
         streak_days=streak,
+        streak_freezes=freezes,
         last_active_date=today,
         quests_completed_total=player["quests_completed_total"] + 1,
+        helium3=new_helium3,
     )
+
+    loot = roll_loot()
+    if loot:
+        add_loot_drop(chat_id, loot)
+
+    quest["helium3_awarded"] = helium3
+    quest["loot"]            = loot
+    quest["freeze_used"]     = freeze_used
     return quest
 
 
@@ -709,11 +790,13 @@ def complete_pomodoro(chat_id: int, session_id: int) -> Optional[Dict]:
             return None
         session = dict(session)
 
+    session["helium3_awarded"] = POMO_HELIUM_BONUS if awarded else 0
     if awarded:
-        player    = get_or_create_player(chat_id)
-        new_xp    = player["total_xp"] + POMO_XP_BONUS
-        new_level = compute_level(new_xp)
-        update_player(chat_id, total_xp=new_xp, level=new_level)
+        player      = get_or_create_player(chat_id)
+        new_xp      = player["total_xp"] + POMO_XP_BONUS
+        new_level   = compute_level(new_xp)
+        new_helium3 = (player.get("helium3", 0) or 0) + POMO_HELIUM_BONUS
+        update_player(chat_id, total_xp=new_xp, level=new_level, helium3=new_helium3)
     return session
 
 
@@ -728,3 +811,60 @@ def get_today_pomodoro_stats(chat_id: int) -> Dict:
             (chat_id, f"{today}%")
         )
         return dict(cur.fetchone())
+
+
+# ─── Inventory & Shop ─────────────────────────────────────────────────────────
+
+def get_inventory(chat_id: int) -> List[Dict]:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT item_key, item_name, rarity, COUNT(*) AS qty FROM inventory "
+            "WHERE chat_id = %s GROUP BY item_key, item_name, rarity "
+            "ORDER BY CASE rarity WHEN 'epic' THEN 0 WHEN 'rare' THEN 1 ELSE 2 END, item_name",
+            (chat_id,)
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+
+def spend_helium3(chat_id: int, amount: int) -> bool:
+    """Atomic check-and-deduct so concurrent spends can't overdraw the balance."""
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE player SET helium3 = helium3 - %s WHERE chat_id = %s AND helium3 >= %s",
+            (amount, chat_id, amount)
+        )
+        return cur.rowcount > 0
+
+
+def buy_streak_freeze(chat_id: int) -> bool:
+    if not spend_helium3(chat_id, SHOP_ITEMS["streak_freeze"]["cost"]):
+        return False
+    with get_db() as conn:
+        conn.cursor().execute(
+            "UPDATE player SET streak_freezes = COALESCE(streak_freezes, 0) + 1 WHERE chat_id = %s",
+            (chat_id,)
+        )
+    return True
+
+
+def buy_custom_title(chat_id: int) -> bool:
+    if not spend_helium3(chat_id, SHOP_ITEMS["custom_title"]["cost"]):
+        return False
+    with get_db() as conn:
+        conn.cursor().execute(
+            "UPDATE player SET custom_title_unlocked = 1 WHERE chat_id = %s",
+            (chat_id,)
+        )
+    return True
+
+
+def set_custom_title(chat_id: int, text: str) -> bool:
+    with get_db() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE player SET custom_title = %s WHERE chat_id = %s AND custom_title_unlocked = 1",
+            (text[:40], chat_id)
+        )
+        return cur.rowcount > 0

@@ -6,13 +6,15 @@
   <a href="/app">Board</a>
   <a href="/app/backlog">Backlog{% if backlog_n %} ({{ backlog_n }}){% endif %}</a>
   <a href="/app/week">Week</a>
+  <a href="/app/inventory">Cargo Hold</a>
+  <a href="/app/shop">Shop</a>
   <a href="/logout">Logout</a>
 </nav>
 {% endblock %}
 {% block content %}
 <div class="card stage-header">
   <h1>Lv.{{ player.level }} {{ title }}</h1>
-  <p>🔥 {{ player.streak_days }}-day streak &nbsp;•&nbsp; {{ player.total_xp }} XP</p>
+  <p>🔥 {{ player.streak_days }}-day streak &nbsp;•&nbsp; {{ player.total_xp }} XP &nbsp;•&nbsp; 🛰️ {{ helium3 }} He-3</p>
   <div class="xpbar"><div class="xpbar-fill" style="width: {{ ((200 - to_next) / 200 * 100) | round(1) }}%"></div></div>
   <p class="muted">{{ to_next }} XP to next stage</p>
 </div>
