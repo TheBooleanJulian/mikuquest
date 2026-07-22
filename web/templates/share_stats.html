@@ -4,11 +4,11 @@
 <p class="badge">👁 Read-only shared view</p>
 <div class="card stage-header">
   <h1>🎤 Level {{ player.level }} — {{ title }}</h1>
-  <p>💎 Total XP: <b>{{ player.total_xp }}</b></p>
+  <p>🛰️ Helium-3: <b>{{ player.helium3 }}</b></p>
   <div class="xpbar"><div class="xpbar-fill" style="width: {{ ((200 - to_next) / 200 * 100) | round(1) }}%"></div></div>
-  <p class="muted">{{ to_next }} XP to next stage</p>
+  <p class="muted">{{ to_next }} He-3 to next level <span class="muted">(lifetime: {{ player.total_xp }})</span></p>
   <p>🔥 Streak: <b>{{ player.streak_days }} days</b></p>
   <p>📋 Total cleared: <b>{{ player.quests_completed_total }}</b></p>
-  <p>☀️ Today: <b>{{ done_today|length }} cleared • +{{ today_xp }} XP</b></p>
+  <p>☀️ Today: <b>{{ done_today|length }} cleared • +{{ today_xp }} He-3</b></p>
 </div>
 {% endblock %}

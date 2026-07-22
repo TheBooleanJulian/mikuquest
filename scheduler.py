@@ -60,7 +60,7 @@ async def send_daily_summary(app: Application):
             ]
 
             if done_yday:
-                lines.append(f"✔️  {len(done_yday)} quest(s) cleared  •  +{yday_xp} XP")
+                lines.append(f"✔️  {len(done_yday)} quest(s) cleared  •  +{yday_xp} He-3")
                 for q in done_yday[:5]:
                     lines.append(f"  ✔️ {trunc(q['text'], 42)}")
                 if len(done_yday) > 5:
@@ -179,8 +179,7 @@ async def pomo_sweep_job(app: Application):
             await app.bot.send_message(
                 chat_id=session["chat_id"],
                 text=(
-                    f"🍅 <b>Pomodoro complete!</b>  +{completed['xp_awarded']} XP  •  "
-                    f"+{completed.get('helium3_awarded', 0)} He-3\n"
+                    f"🍅 <b>Pomodoro complete!</b>  +{completed.get('helium3_awarded', 0)} He-3\n"
                     f"{session['duration_minutes']} minutes of focus, nailed it~ 🎵"
                     f"{quest_note}"
                 ),

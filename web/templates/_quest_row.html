@@ -18,7 +18,7 @@
     {% if q.status != "in_progress" %}
     <form method="post" action="/app/quest/{{ q.id }}/begin"><button>▶ Begin</button></form>
     {% endif %}
-    <form method="post" action="/app/quest/{{ q.id }}/done"><button class="primary">✅ +{{ q.xp_value }}xp</button></form>
+    <form method="post" action="/app/quest/{{ q.id }}/done"><button class="primary">✅ +{{ q.xp_value }} He-3</button></form>
     <form method="post" action="/app/quest/{{ q.id }}/drop"><button class="danger">🗑</button></form>
     <form method="post" action="/app/pomo/start">
       <input type="hidden" name="quest_id" value="{{ q.id }}">

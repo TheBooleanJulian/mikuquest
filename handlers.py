@@ -155,8 +155,8 @@ def render_board(chat_id: int, tag_filter: str = None):
     lines = [
         f"╔══════════════════════════╗",
         f"║  🎤 MIGUQUEST  •  Lv.{level} {title}",
-        f"║  🔥 {streak}-day streak  •  {xp} XP  •  🛰️ {helium3} He-3",
-        f"║  [{xp_bar(xp)}] {to_next} XP to next stage",
+        f"║  🔥 {streak}-day streak  •  🛰️ {helium3} He-3",
+        f"║  [{xp_bar(xp)}] {to_next} He-3 to next level",
         f"╚══════════════════════════╝{tag_note}",
     ]
 
@@ -169,7 +169,7 @@ def render_board(chat_id: int, tag_filter: str = None):
     if daily_quest and daily_quest["status"] in ("todo", "in_progress"):
         lines.append(f"\n🌟 <b>MIKU'S QUEST OF THE DAY</b>  <i>({daily_quest['category']})</i>")
         lines.append("──────────────────────────────")
-        lines.append(f"{daily_quest['text']}  💎 +{daily_quest['xp_value']}xp")
+        lines.append(f"{daily_quest['text']}  🛰️ +{daily_quest['xp_value']} He-3")
         keyboard.append([InlineKeyboardButton(
             f"✅ {trunc(daily_quest['text'], 30)}",
             callback_data=f"done:{daily_quest['id']}"
@@ -213,8 +213,8 @@ def render_board(chat_id: int, tag_filter: str = None):
     if done_today:
         today_xp = sum(q["xp_value"] for q in done_today)
         for q in done_today:
-            lines.append(f"✔️  {trunc(q['text'])}  +{q['xp_value']}xp")
-        lines.append(f"<i>+{today_xp} XP earned today  🎵</i>")
+            lines.append(f"✔️  {trunc(q['text'])}  +{q['xp_value']} He-3")
+        lines.append(f"<i>+{today_xp} He-3 earned today  🎵</i>")
     else:
         lines.append("  — No completions yet~ —")
 
@@ -255,7 +255,7 @@ def quest_card_text(quest: dict) -> str:
         f"{sti} {quest['text']}\n\n"
         f"📌 Priority: <b>{quest['priority'].upper()}</b> {ico}   🏷 {quest['tag']}"
         f"{due}{rec}\n"
-        f"💎 XP: <b>+{quest['xp_value']}</b> on clear"
+        f"🛰️ He-3: <b>+{quest['xp_value']}</b> on clear"
         f"{notes_block}"
     )
 
@@ -267,10 +267,10 @@ def quest_card_markup(quest: dict, is_goal: bool = False) -> InlineKeyboardMarku
     if quest["status"] != "in_progress":
         rows.append([
             InlineKeyboardButton("▶ Performing now",         callback_data=f"start:{qid}"),
-            InlineKeyboardButton(f"✅ Nailed it! +{xpv}xp", callback_data=f"done:{qid}"),
+            InlineKeyboardButton(f"✅ Nailed it! +{xpv} He-3", callback_data=f"done:{qid}"),
         ])
     else:
-        rows.append([InlineKeyboardButton(f"✅ Nailed it! +{xpv}xp", callback_data=f"done:{qid}")])
+        rows.append([InlineKeyboardButton(f"✅ Nailed it! +{xpv} He-3", callback_data=f"done:{qid}")])
 
     rows.append([
         InlineKeyboardButton("🔴 Critical", callback_data=f"prio:critical:{qid}"),
@@ -335,7 +335,7 @@ async def _create_quest(update: Update, chat_id: int, text: str,
         f"{clean}\n\n"
         f"📌 Priority: <b>{priority.upper()}</b> {ico}   🏷 {tag}"
         f"{due_line}{rec_line}\n"
-        f"💎 <b>+{quest['xp_value']} XP</b> when you nail this one!"
+        f"🛰️ <b>+{quest['xp_value']} He-3</b> when you nail this one!"
     )
 
     kb = InlineKeyboardMarkup([
@@ -376,9 +376,8 @@ async def _complete(chat_id: int, quest_id: int, query=None, update=None):
     msg = (
         f"🎶 <b>QUEST CLEARED — ENCORE!</b>\n"
         f"{quest['text']}\n\n"
-        f"⚡ +{quest['xp_value']} XP  •  {player['total_xp']} total  •  Lv.{player['level']}\n"
-        f"🔥 {player['streak_days']}-day streak  •  {done_cnt} quests cleared today\n"
-        f"🛰️ Salvage recovered: +{quest.get('helium3_awarded', 0)} He-3"
+        f"🛰️ +{quest.get('helium3_awarded', 0)} He-3  •  Lv.{player['level']}\n"
+        f"🔥 {player['streak_days']}-day streak  •  {done_cnt} quests cleared today"
     )
     loot = quest.get("loot")
     if loot:
@@ -391,8 +390,7 @@ async def _complete(chat_id: int, quest_id: int, query=None, update=None):
     if quest.get("recurring"):
         msg += f"\n🔁 Next <b>{quest['recurring']}</b> quest auto-added to setlist~"
     if level_up:
-        title = db.get_title(player["level"])
-        msg  += f"\n\n🎉 <b>LEVEL UP — NEW STAGE UNLOCKED!</b>\nWelcome to Lv.{player['level']} — {title}\nThe crowd goes wild~ ✨"
+        msg += f"\n\n🎉 <b>LEVEL UP!</b>\nWelcome to Lv.{player['level']}~\nThe crowd goes wild~ ✨"
 
     kb = InlineKeyboardMarkup([[
         InlineKeyboardButton("📋 Stage", callback_data="board:refresh_new")
@@ -446,7 +444,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "<code>/pomo</code>                  — Start a 25-min freeform focus session\n"
         "<code>/pomo &lt;id&gt;</code>             — Focus session tied to a quest\n"
         "<code>/pomo &lt;id&gt; 45</code>          — Custom duration (10–90 min)\n"
-        "<i>+15 XP bonus per completed session~</i>\n\n"
+        "<i>+15 He-3 bonus per completed session~</i>\n\n"
         "<b>Helium-3 &amp; Salvage</b>\n"
         "<code>/inventory</code>             — View collected salvage, cosmetics &amp; Helium-3\n"
         "<code>/shop</code>                  — Spend Helium-3 (custom title unlock)\n"
@@ -619,13 +617,12 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🎵 <b>Concert Stats</b>\n"
         f"━━━━━━━━━━━━━━━━━\n"
         f"🎤 Level: <b>{player['level']} — {title}</b>\n"
-        f"💎 Total XP: <b>{player['total_xp']}</b>\n"
-        f"[{xp_bar(player['total_xp'])}] {to_next} XP to next stage\n\n"
+        f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>\n"
+        f"[{xp_bar(player['total_xp'])}] {to_next} He-3 to next level  <i>(lifetime: {player['total_xp']})</i>\n\n"
         f"🔥 Streak: <b>{player['streak_days']} days</b>\n"
         f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
-        f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>\n"
-        f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP\n"
-        f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>",
+        f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} He-3</b>\n"
+        f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} He-3",
         parse_mode=ParseMode.HTML
     )
 
@@ -726,7 +723,7 @@ async def _send_week_summary(chat_id: int, send_fn):
     lines = [
         f"📊 <b>WEEKLY REPORT  •  {week_str}</b>",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"✔️  <b>{len(quests)} quests cleared</b>  •  +{week_xp} XP",
+        f"✔️  <b>{len(quests)} quests cleared</b>  •  +{week_xp} He-3",
         f"🔥 Streak: <b>{player['streak_days']} days</b>",
         f"🎤 Level: <b>{player['level']} — {db.get_display_title(player)}</b>",
         "",
@@ -1196,13 +1193,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🎵 <b>Concert Stats</b>\n"
             f"━━━━━━━━━━━━━━━━━\n"
             f"🎤 Level: <b>{player['level']} — {title}</b>\n"
-            f"💎 Total XP: <b>{player['total_xp']}</b>\n"
-            f"[{xp_bar(player['total_xp'])}] {to_next} XP to next stage\n\n"
+            f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>\n"
+            f"[{xp_bar(player['total_xp'])}] {to_next} He-3 to next level  <i>(lifetime: {player['total_xp']})</i>\n\n"
             f"🔥 Streak: <b>{player['streak_days']} days</b>\n"
             f"📋 Total cleared: <b>{player['quests_completed_total']}</b>\n"
-            f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} XP</b>\n"
-            f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} XP\n"
-            f"🛰️ Helium-3: <b>{player.get('helium3', 0) or 0}</b>"
+            f"☀️ Today: <b>{len(done_today)} cleared  •  +{today_xp} He-3</b>\n"
+            f"🍅 Pomodoros today: <b>{pomo['count']}</b>  •  {pomo['minutes']}m focused  •  +{pomo['xp']} He-3"
         )
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("← Back to Stage", callback_data="board:refresh")]])
         await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=kb)

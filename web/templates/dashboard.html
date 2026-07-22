@@ -14,9 +14,9 @@
 {% block content %}
 <div class="card stage-header">
   <h1>Lv.{{ player.level }} {{ title }}</h1>
-  <p>🔥 {{ player.streak_days }}-day streak &nbsp;•&nbsp; {{ player.total_xp }} XP &nbsp;•&nbsp; 🛰️ {{ helium3 }} He-3</p>
+  <p>🔥 {{ player.streak_days }}-day streak &nbsp;•&nbsp; 🛰️ {{ helium3 }} He-3</p>
   <div class="xpbar"><div class="xpbar-fill" style="width: {{ ((200 - to_next) / 200 * 100) | round(1) }}%"></div></div>
-  <p class="muted">{{ to_next }} XP to next stage</p>
+  <p class="muted">{{ to_next }} He-3 to next level <span class="muted">(lifetime: {{ player.total_xp }})</span></p>
 </div>
 
 {% if share_link %}
@@ -30,7 +30,7 @@
   <h2>🌟 Miku's Quest of the Day <span class="muted">({{ daily_quest.category }})</span></h2>
   <p>{{ daily_quest.text }}</p>
   <form method="post" action="/app/quest/{{ daily_quest.id }}/done">
-    <button type="submit" class="primary">✅ +{{ daily_quest.xp_value }}xp</button>
+    <button type="submit" class="primary">✅ +{{ daily_quest.xp_value }} He-3</button>
   </form>
 </div>
 {% endif %}
@@ -84,11 +84,11 @@
   <h2>✅ Done Today ({{ done_today|length }})</h2>
   <ul class="quest-list">
     {% for q in done_today %}
-    <li class="quest done"><span class="text">{{ q.text }}</span> <span class="xp">+{{ q.xp_value }}xp</span></li>
+    <li class="quest done"><span class="text">{{ q.text }}</span> <span class="xp">+{{ q.xp_value }} He-3</span></li>
     {% endfor %}
     {% if not done_today %}<li class="empty">— No completions yet~ —</li>{% endif %}
   </ul>
-  {% if done_today %}<p class="muted">+{{ today_xp }} XP earned today 🎵</p>{% endif %}
+  {% if done_today %}<p class="muted">+{{ today_xp }} He-3 earned today 🎵</p>{% endif %}
 </div>
 
 <div class="card">
@@ -111,7 +111,7 @@
     var s = String(remaining % 60).padStart(2, "0");
     el.textContent = m + ":" + s;
     if (remaining <= 0) {
-      el.textContent = "00:00 — refresh to see your XP!";
+      el.textContent = "00:00 — refresh to see your He-3!";
     }
   }
   tick();

@@ -10,16 +10,18 @@ import psycopg2.extras
 import psycopg2.pool
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
-XP_MAP = {"critical": 40, "high": 30, "medium": 20, "low": 10}
+DEFAULT_TITLE = "Unpaid Intern"
 
 BACKLOG_AUTOPULL_N  = 5
 POMO_DEFAULT_MINUTES = 25
 POMO_MIN_MINUTES    = 10
 POMO_MAX_MINUTES    = 90
-POMO_XP_BONUS       = 15
-POMO_HELIUM_BONUS   = 3
+POMO_HELIUM_BONUS   = 15
 
-HELIUM_MAP       = {"critical": 8, "high": 6, "medium": 4, "low": 2}
+# Helium-3 is the sole progression currency: it funds the shop (spendable
+# player.helium3) and, cumulatively, drives levels (player.total_xp — kept as
+# the lifetime-earned counter/column name to avoid a schema migration).
+HELIUM_MAP       = {"critical": 40, "high": 30, "medium": 20, "low": 10}
 LOOT_DROP_CHANCE = 0.3
 RARITY_WEIGHTS   = {"common": 70, "rare": 25, "epic": 5}
 LOOT_POOL = [
@@ -43,7 +45,7 @@ SHOP_ITEMS = {
                        "desc": "Unlocks /settitle to set your own vanity title."},
 }
 
-DAILY_QUEST_XP = 35
+DAILY_QUEST_HELIUM = 35
 DAILY_QUEST_POOL = [
     {"text": "Do a 10-minute stretch or workout",                         "category": "self-improvement"},
     {"text": "Write down 3 things you're grateful for",                   "category": "self-improvement"},
@@ -224,18 +226,8 @@ def compute_level(xp: int) -> int:
     return max(1, 1 + xp // 200)
 
 
-def get_title(level: int) -> str:
-    if level < 5:  return "Roadie"
-    if level < 10: return "Opening Act"
-    if level < 15: return "Supporting Act"
-    if level < 20: return "Feature Artist"
-    if level < 25: return "Headliner"
-    if level < 30: return "World Tour"
-    return "✨ Diva Mode ✨"
-
-
 def get_display_title(player: Dict) -> str:
-    return player.get("custom_title") or get_title(player["level"])
+    return player.get("custom_title") or DEFAULT_TITLE
 
 
 def get_or_create_player(chat_id: int) -> Dict:
@@ -275,7 +267,7 @@ def add_quest(chat_id: int, text: str, priority: str = "medium",
               tag: str = "#general", source: str = "typed",
               due_date: str = None, recurring: str = None,
               gcal_event_id: str = None) -> Dict:
-    xp  = XP_MAP.get(priority, 20)
+    xp  = HELIUM_MAP.get(priority, 20)
     now = datetime.now().isoformat()
     with get_db() as conn:
         cur = conn.cursor()
@@ -338,7 +330,7 @@ def update_quest_status(quest_id: int, status: str) -> Optional[Dict]:
 
 
 def update_quest_priority(quest_id: int, priority: str) -> Optional[Dict]:
-    xp = XP_MAP.get(priority, 20)
+    xp = HELIUM_MAP.get(priority, 20)
     with get_db() as conn:
         cur = conn.cursor()
         cur.execute(
@@ -400,14 +392,14 @@ def complete_quest(chat_id: int, quest_id: int) -> Optional[Dict]:
     elif last != today:
         streak = 1
 
-    new_xp      = player["total_xp"] + quest["xp_value"]
-    new_level   = compute_level(new_xp)
-    helium3     = HELIUM_MAP.get(quest["priority"], 4)
+    helium3     = quest["xp_value"]
+    new_lifetime = player["total_xp"] + helium3
+    new_level   = compute_level(new_lifetime)
     new_helium3 = (player.get("helium3", 0) or 0) + helium3
 
     update_player(
         chat_id,
-        total_xp=new_xp,
+        total_xp=new_lifetime,
         level=new_level,
         streak_days=streak,
         last_active_date=today,
@@ -659,7 +651,7 @@ def ensure_daily_quest_for_chat(chat_id: int) -> Optional[Dict]:
             "INSERT INTO quests (chat_id, text, source, status, priority, tag, xp_value, "
             "created_at, daily_quest_date) "
             "VALUES (%s, %s, 'daily_miku', 'todo', 'high', '#daily', %s, %s, %s) RETURNING id",
-            (chat_id, global_quest["text"], DAILY_QUEST_XP, now, today)
+            (chat_id, global_quest["text"], DAILY_QUEST_HELIUM, now, today)
         )
         qid = cur.fetchone()["id"]
         cur.execute("SELECT * FROM quests WHERE id = %s", (qid,))
@@ -902,7 +894,7 @@ def complete_pomodoro(chat_id: int, session_id: int) -> Optional[Dict]:
         cur.execute(
             "UPDATE pomodoro_sessions SET status = 'completed', completed_at = %s, "
             "xp_awarded = %s WHERE id = %s AND status = 'running'",
-            (now, POMO_XP_BONUS, session_id)
+            (now, POMO_HELIUM_BONUS, session_id)
         )
         awarded = cur.rowcount > 0
         cur.execute("SELECT * FROM pomodoro_sessions WHERE id = %s", (session_id,))
@@ -913,11 +905,11 @@ def complete_pomodoro(chat_id: int, session_id: int) -> Optional[Dict]:
 
     session["helium3_awarded"] = POMO_HELIUM_BONUS if awarded else 0
     if awarded:
-        player      = get_or_create_player(chat_id)
-        new_xp      = player["total_xp"] + POMO_XP_BONUS
-        new_level   = compute_level(new_xp)
-        new_helium3 = (player.get("helium3", 0) or 0) + POMO_HELIUM_BONUS
-        update_player(chat_id, total_xp=new_xp, level=new_level, helium3=new_helium3)
+        player       = get_or_create_player(chat_id)
+        new_lifetime = player["total_xp"] + POMO_HELIUM_BONUS
+        new_level    = compute_level(new_lifetime)
+        new_helium3  = (player.get("helium3", 0) or 0) + POMO_HELIUM_BONUS
+        update_player(chat_id, total_xp=new_lifetime, level=new_level, helium3=new_helium3)
     return session
 
 

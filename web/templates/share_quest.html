@@ -8,7 +8,7 @@
   <p>📌 Priority: <b>{{ quest.priority|upper }}</b> {{ PRIORITY_ICONS[quest.priority] }} &nbsp; 🏷 {{ quest.tag }}</p>
   {% if quest.due_date %}<p>📅 Due: <b>{{ quest.due_date }}</b></p>{% endif %}
   {% if quest.recurring %}<p>🔁 Recurring: <b>{{ quest.recurring }}</b></p>{% endif %}
-  <p>💎 XP: <b>+{{ quest.xp_value }}</b> on clear</p>
+  <p>🛰️ He-3: <b>+{{ quest.xp_value }}</b> on clear</p>
   {% if quest.notes %}
   <div class="notes">
     {% for line in quest.notes.splitlines() %}<p>{{ line }}</p>{% endfor %}

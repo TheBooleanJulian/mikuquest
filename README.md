@@ -2,7 +2,7 @@
 
 # MikuQuest
 
-**Telegram-native gamified task manager with XP, streaks & daily debrief — built for solopreneurs juggling too many things at once.**
+**Telegram-native gamified task manager with Helium-3 rewards, streaks & daily debrief — built for solopreneurs juggling too many things at once.**
 
 ![Python](https://img.shields.io/badge/-Python-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/-FastAPI-009688?logo=fastapi&logoColor=white)
@@ -17,7 +17,7 @@
 
 ## What it does
 
-MikuQuest turns every Telegram message or forward into a tracked quest — no forms, no context switching, no friction. Solopreneurs log tasks the way they already think: by typing. The bot auto-tags quests by context, lets you move them through a Kanban board via inline buttons, and rewards completions with XP and level-ups. A daily 6AM SGT debrief keeps yesterday's wins and today's priorities front of mind, while a shareable web dashboard gives you a browser view of the same data without leaving your workflow.
+MikuQuest turns every Telegram message or forward into a tracked quest — no forms, no context switching, no friction. Solopreneurs log tasks the way they already think: by typing. The bot auto-tags quests by context, lets you move them through a Kanban board via inline buttons, and rewards completions with Helium-3 and level-ups. A daily 6AM SGT debrief keeps yesterday's wins and today's priorities front of mind, while a shareable web dashboard gives you a browser view of the same data without leaving your workflow.
 
 ## Features
 
@@ -25,7 +25,8 @@ MikuQuest turns every Telegram message or forward into a tracked quest — no fo
 - **Kanban board** — `/board` shows TODO / IN PROGRESS / DONE TODAY with inline action buttons
 - **Priority system** — `!c` `!h` `!m` `!l` prefixes, plus tap-to-change on any quest card
 - **Auto-tagging** — keyword-based context tags: `#accurova` `#dev` `#tutoring` `#personal` `#busking`
-- **XP + Levels** — Critical=40 XP, High=30, Medium=20, Low=10; level up every 200 XP across 7 named tiers (Scout → Overlord)
+- **Helium-3 + Levels** — Critical=40, High=30, Medium=20, Low=10 He-3 per quest; level up every 200 lifetime He-3 earned
+- **Cosmetic titles** — a chance to drop a collectible title on quest clear; `/equip` it for free, or buy a freeform `/settitle` in the shop
 - **Streaks** — consecutive days with at least one quest cleared
 - **Daily 6AM SGT Debrief** — yesterday's completions + today's active quests delivered automatically
 - **Web dashboard** — `/web` DMs a one-time login link to a browser view mirroring all bot data
@@ -108,7 +109,7 @@ mikuquest/
 | `/begin <id>` | Move quest to In Progress |
 | `/drop <id>` | Drop a quest |
 | `/tag #<tag>` | Board filtered by tag |
-| `/stats` | XP, level, streak, totals |
+| `/stats` | Helium-3, level, streak, totals |
 | `/clear` | Archive all done quests |
 | `/web` | One-time login link to the web dashboard |
 | `/share board\|today\|week\|stats` | Public read-only share link |
@@ -125,7 +126,7 @@ Deployed on Zeabur as **two services** sharing one managed Postgres database:
 
 ## Status / Roadmap
 
-- [x] Core quest capture, board, priorities, XP & levels
+- [x] Core quest capture, board, priorities, Helium-3 & levels
 - [x] Streaks and daily 6AM debrief
 - [x] Hatsune Miku flavour across all bot messages
 - [x] Web dashboard with one-time login links
@@ -137,6 +138,7 @@ Deployed on Zeabur as **two services** sharing one managed Postgres database:
 
 ## Changelog
 
+- **Jul 2026** — XP deprecated: Helium-3 is now the sole progression currency (rescaled to the old XP amounts) and drives levels; titles are purely cosmetic-drop based (`/equip`), defaulting to "Unpaid Intern"
 - **Jul 2026** — Web dashboard launched: `/web` one-time login links, public share links (`/share board|today|week|stats`), FastAPI + Jinja2 web service sharing the same Postgres database as the bot
 - **Mar 2026** — Major feature update: AI parsing via Claude, Google Calendar integration, PostgreSQL migration from SQLite, APScheduler daily debrief, streaks, XP system
 - **Mar 2026** — Hatsune Miku personality applied across all bot messages
