@@ -105,6 +105,7 @@ def board_snapshot(chat_id: int, tag_filter: str = None, mutate: bool = True) ->
         "active_pomo": active_pomo,
         "helium3": player.get("helium3", 0) or 0,
         "daily_quest": daily_quest,
+        "daily_quest_resets_at": db.next_daily_reset().isoformat() if daily_quest else None,
     }
 
 

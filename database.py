@@ -599,6 +599,12 @@ def pull_from_backlog(chat_id: int, quest_id: int) -> Optional[Dict]:
 
 # ─── Miku's Quest of the Day ──────────────────────────────────────────────────
 
+def next_daily_reset() -> datetime:
+    """Midnight tonight (server-local) — when Miku's Quest of the Day rotates."""
+    tomorrow = date.today() + timedelta(days=1)
+    return datetime.combine(tomorrow, datetime.min.time())
+
+
 def get_or_create_daily_quest() -> Dict:
     """The single quest-of-the-day, shared globally across every account."""
     today = date.today().isoformat()

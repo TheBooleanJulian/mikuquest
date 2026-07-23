@@ -29,6 +29,7 @@
 <div class="card daily-quest-card">
   <h2>🌟 Miku's Quest of the Day <span class="muted">({{ daily_quest.category }})</span></h2>
   <p>{{ daily_quest.text }}</p>
+  <p class="muted">⏳ Resets in <span class="daily-quest-countdown" data-ends-at="{{ daily_quest_resets_at }}">--:--:--</span></p>
   <form method="post" action="/app/quest/{{ daily_quest.id }}/done">
     <button type="submit" class="primary">✅ +{{ daily_quest.xp_value }} He-3</button>
   </form>
@@ -102,20 +103,28 @@
 {% block scripts %}
 <script>
 (function () {
-  var el = document.querySelector(".pomo-countdown");
-  if (!el) return;
-  var endsAt = new Date(el.dataset.endsAt + "Z").getTime();
-  function tick() {
-    var remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
-    var m = String(Math.floor(remaining / 60)).padStart(2, "0");
-    var s = String(remaining % 60).padStart(2, "0");
-    el.textContent = m + ":" + s;
-    if (remaining <= 0) {
-      el.textContent = "00:00 — refresh to see your He-3!";
+  function startCountdown(el, expiredText, showHours) {
+    var endsAt = new Date(el.dataset.endsAt + "Z").getTime();
+    function tick() {
+      var remaining = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+      if (remaining <= 0) {
+        el.textContent = expiredText;
+        return;
+      }
+      var h = Math.floor(remaining / 3600);
+      var m = String(Math.floor((remaining % 3600) / 60)).padStart(2, "0");
+      var s = String(remaining % 60).padStart(2, "0");
+      el.textContent = showHours ? (h + ":" + m + ":" + s) : (m + ":" + s);
     }
+    tick();
+    setInterval(tick, 1000);
   }
-  tick();
-  setInterval(tick, 1000);
+
+  var pomo = document.querySelector(".pomo-countdown");
+  if (pomo) startCountdown(pomo, "00:00 — refresh to see your He-3!", false);
+
+  var daily = document.querySelector(".daily-quest-countdown");
+  if (daily) startCountdown(daily, "any moment now~", true);
 })();
 </script>
 {% endblock %}

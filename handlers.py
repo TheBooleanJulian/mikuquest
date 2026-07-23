@@ -167,9 +167,13 @@ def render_board(chat_id: int, tag_filter: str = None):
     keyboard = []
 
     if daily_quest and daily_quest["status"] in ("todo", "in_progress"):
+        reset_in = db.next_daily_reset() - datetime.now()
+        hrs, rem = divmod(max(0, int(reset_in.total_seconds())), 3600)
+        mins = rem // 60
         lines.append(f"\n🌟 <b>MIKU'S QUEST OF THE DAY</b>  <i>({daily_quest['category']})</i>")
         lines.append("──────────────────────────────")
         lines.append(f"{daily_quest['text']}  🛰️ +{daily_quest['xp_value']} He-3")
+        lines.append(f"⏳ <i>Resets in {hrs}h {mins}m</i>")
         keyboard.append([InlineKeyboardButton(
             f"✅ {trunc(daily_quest['text'], 30)}",
             callback_data=f"done:{daily_quest['id']}"
