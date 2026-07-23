@@ -212,6 +212,12 @@ def init_db():
         cur.execute("ALTER TABLE player DROP COLUMN IF EXISTS streak_freezes")
         cur.execute("ALTER TABLE inventory ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'material'")
 
+        # One-time relabel of quests tagged under the old context-tag names.
+        cur.execute("UPDATE quests SET tag = '#thebooleanjulian' WHERE tag = '#dev'")
+        cur.execute("UPDATE quests SET tag = '#upteach' WHERE tag = '#tutoring'")
+        cur.execute("UPDATE quests SET tag = '#xymiku' WHERE tag = '#personal'")
+        cur.execute("UPDATE quests SET tag = '#misc' WHERE tag IN ('#busking', '#general')")
+
         for key, text, rarity in COSMETIC_SEED:
             cur.execute(
                 "INSERT INTO cosmetics (key, text, rarity) VALUES (%s, %s, %s) "
