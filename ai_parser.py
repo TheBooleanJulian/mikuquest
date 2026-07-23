@@ -17,16 +17,16 @@ JSON structure:
 {
   "task": "concise action item (max 80 chars, imperative verb)",
   "priority": "low|medium|high|critical",
-  "tag": "#accurova|#dev|#tutoring|#personal|#busking|#general",
+  "tag": "#accurova|#thebooleanjulian|#upteach|#xymiku|#misc",
   "due": "natural language date string or null"
 }
 
 Tag rules:
 - #accurova: photography, studio, clients, shoots, invoices, retouching, Canon, Nikon
-- #dev: code, bots, deploy, bugs, GitHub, scripts, apps, APIs, Zeabur
-- #tutoring: students (Angela, Denzel, Pakorn, Jessica, Theethus, Rin, Poon), lessons, math, worksheets
-- #busking: FattKew, NAC, busking, OneBoyBand
-- #personal: cosplay, Miku, figures, errands, personal admin
+- #thebooleanjulian: code, bots, deploy, bugs, GitHub, scripts, apps, APIs, Zeabur
+- #upteach: students (Angela, Denzel, Pakorn, Jessica, Theethus, Rin, Poon), lessons, math, worksheets
+- #xymiku: cosplay, Miku, figures, errands, personal admin
+- #misc: FattKew, NAC, busking, OneBoyBand, anything else that doesn't fit above
 
 Priority rules:
 - critical: urgent/blocking/ASAP/deadline today

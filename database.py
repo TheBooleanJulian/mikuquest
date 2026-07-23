@@ -115,7 +115,7 @@ def init_db():
                 source          TEXT    DEFAULT 'typed',
                 status          TEXT    DEFAULT 'todo',
                 priority        TEXT    DEFAULT 'medium',
-                tag             TEXT    DEFAULT '#general',
+                tag             TEXT    DEFAULT '#misc',
                 xp_value        INTEGER DEFAULT 20,
                 notes           TEXT    DEFAULT '',
                 due_date        TEXT,
@@ -264,7 +264,7 @@ def get_all_chat_ids() -> List[int]:
 # ─── Quests ─────────────────────────────────────────────────────────────────────
 
 def add_quest(chat_id: int, text: str, priority: str = "medium",
-              tag: str = "#general", source: str = "typed",
+              tag: str = "#misc", source: str = "typed",
               due_date: str = None, recurring: str = None,
               gcal_event_id: str = None) -> Dict:
     xp  = HELIUM_MAP.get(priority, 20)

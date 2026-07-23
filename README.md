@@ -24,7 +24,7 @@ MikuQuest turns every Telegram message or forward into a tracked quest — no fo
 - **Auto-capture** — any typed or forwarded message instantly becomes a quest
 - **Kanban board** — `/board` shows TODO / IN PROGRESS / DONE TODAY with inline action buttons
 - **Priority system** — `!c` `!h` `!m` `!l` prefixes, plus tap-to-change on any quest card
-- **Auto-tagging** — keyword-based context tags: `#accurova` `#dev` `#tutoring` `#personal` `#busking`
+- **Auto-tagging** — keyword-based context tags: `#accurova` `#thebooleanjulian` `#upteach` `#xymiku` `#misc`
 - **Helium-3 + Levels** — Critical=40, High=30, Medium=20, Low=10 He-3 per quest; level up every 200 lifetime He-3 earned
 - **Cosmetic titles** — a chance to drop a collectible title on quest clear; `/equip` it for free, or buy a freeform `/settitle` in the shop
 - **Streaks** — consecutive days with at least one quest cleared

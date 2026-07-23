@@ -168,14 +168,14 @@ def fetch_todays_events(days_ahead: int = 1) -> List[Dict]:
 def infer_tag_from_event(summary: str) -> str:
     low = summary.lower()
     tag_map = {
-        "#tutoring":  ["tutor", "angela", "denzel", "pakorn", "jessica", "theethus",
-                       "rin", "poon", "lesson", "class", "math"],
-        "#accurova":  ["shoot", "photobooth", "client", "accurova", "photo", "session"],
-        "#dev":       ["deploy", "code", "sprint", "standup", "review", "pr", "bug"],
-        "#busking":   ["busking", "fattkew", "nac", "busk"],
-        "#personal":  ["doctor", "dentist", "gym", "cosplay", "miku"],
+        "#upteach":          ["tutor", "angela", "denzel", "pakorn", "jessica", "theethus",
+                              "rin", "poon", "lesson", "class", "math"],
+        "#accurova":         ["shoot", "photobooth", "client", "accurova", "photo", "session"],
+        "#thebooleanjulian": ["deploy", "code", "sprint", "standup", "review", "pr", "bug"],
+        "#misc":             ["busking", "fattkew", "nac", "busk"],
+        "#xymiku":           ["doctor", "dentist", "gym", "cosplay", "miku"],
     }
     for tag, keywords in tag_map.items():
         if any(k in low for k in keywords):
             return tag
-    return "#general"
+    return "#misc"

@@ -22,16 +22,16 @@ PRIORITY_LABELS = {"critical": "!C", "high": "!H", "medium": "!M", "low": "!L"}
 STATUS_ICONS    = {"todo": "⬜", "in_progress": "🔷", "done": "✅", "dropped": "🗑", "archived": "📦"}
 
 TAG_KEYWORDS = {
-    "#accurova":  ["accurova", "shoot", "photobooth", "client", "booking", "invoice",
-                   "photo", "camera", "edit", "retouch", "selphy", "studio", "portrait"],
-    "#dev":       ["bot", "code", "deploy", "zeabur", "github", "bug", "fix", "react",
-                   "python", "script", "build", "app", "api", "db", "sql", "commit", "push"],
-    "#tutoring":  ["tutor", "student", "angela", "denzel", "jessica", "pakorn",
-                   "poon", "pun pun", "rin", "theethus", "lesson", "worksheet",
-                   "math", "educare", "class", "homework"],
-    "#personal":  ["cosplay", "miku", "figure", "ezlink", "grocery", "food",
-                   "buy", "shop", "errands", "dentist", "doctor"],
-    "#busking":   ["fattkew", "fattk", "busking", "nac", "busk", "oneboyband"],
+    "#accurova":        ["accurova", "shoot", "photobooth", "client", "booking", "invoice",
+                         "photo", "camera", "edit", "retouch", "selphy", "studio", "portrait"],
+    "#thebooleanjulian": ["bot", "code", "deploy", "zeabur", "github", "bug", "fix", "react",
+                         "python", "script", "build", "app", "api", "db", "sql", "commit", "push"],
+    "#upteach":         ["tutor", "student", "angela", "denzel", "jessica", "pakorn",
+                         "poon", "pun pun", "rin", "theethus", "lesson", "worksheet",
+                         "math", "educare", "class", "homework"],
+    "#xymiku":          ["cosplay", "miku", "figure", "ezlink", "grocery", "food",
+                         "buy", "shop", "errands", "dentist", "doctor"],
+    "#misc":            ["fattkew", "fattk", "busking", "nac", "busk", "oneboyband"],
 }
 
 SKIP_WORDS = {"ok", "okay", "yes", "no", "k", "thanks", "ty", "noted", "sure",
@@ -97,7 +97,7 @@ def infer_tag(text: str) -> str:
     m = re.search(r"#\w+", text)
     if m:
         return m.group(0).lower()
-    return "#general"
+    return "#misc"
 
 
 def trunc(text: str, n: int = 35) -> str:
